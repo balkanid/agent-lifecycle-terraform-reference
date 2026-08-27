@@ -47,7 +47,7 @@ jobs:
       APPROVAL_WAIT_MINUTES: ${{ github.event.inputs.approval_wait_minutes != '' && github.event.inputs.approval_wait_minutes || vars.APPROVAL_WAIT_MINUTES || '120' }}
       AGENT_NAME: ${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.AGENT_NAME || 'demo-support-agent' }}
       BALKANID_PUBLIC_API_URL: ${{ vars.BALKANID_PUBLIC_API_URL }}
-      BALKANID_EMPLOYEE_EMAIL: ${{ vars.BALKANID_EMPLOYEE_EMAIL }}
+      BALKANID_AGENT_OWNER_EMAIL: ${{ vars.BALKANID_AGENT_OWNER_EMAIL }}
       BALKANID_INTEGRATION_ID: ${{ vars.BALKANID_INTEGRATION_ID }}
       AGENT_OWNER_EMAIL: ${{ vars.AGENT_OWNER_EMAIL || '' }}
       AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Agent lifecycle CD pipeline demo' }}
@@ -96,7 +96,7 @@ jobs:
           TF_VAR_balkanid_public_api_url: ${{ env.BALKANID_PUBLIC_API_URL }}
           TF_VAR_api_key_id: ${{ secrets.BALKANID_API_KEY_ID }}
           TF_VAR_api_key_secret: ${{ secrets.BALKANID_API_KEY_SECRET }}
-          TF_VAR_employee_email: ${{ env.BALKANID_EMPLOYEE_EMAIL }}
+          TF_VAR_agent_owner_email: ${{ env.BALKANID_AGENT_OWNER_EMAIL }}
           TF_VAR_integration_id: ${{ env.BALKANID_INTEGRATION_ID }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_owner_email: ${{ env.AGENT_OWNER_EMAIL }}
@@ -117,7 +117,7 @@ jobs:
           TF_VAR_balkanid_public_api_url: ${{ env.BALKANID_PUBLIC_API_URL }}
           TF_VAR_api_key_id: ${{ secrets.BALKANID_API_KEY_ID }}
           TF_VAR_api_key_secret: ${{ secrets.BALKANID_API_KEY_SECRET }}
-          TF_VAR_employee_email: ${{ env.BALKANID_EMPLOYEE_EMAIL }}
+          TF_VAR_agent_owner_email: ${{ env.BALKANID_AGENT_OWNER_EMAIL }}
           TF_VAR_integration_id: ${{ env.BALKANID_INTEGRATION_ID }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_owner_email: ${{ env.AGENT_OWNER_EMAIL }}
