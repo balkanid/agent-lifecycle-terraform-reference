@@ -1,0 +1,50 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockAgentLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:CreateAgent",
+        "bedrock:GetAgent",
+        "bedrock:ListAgents",
+        "bedrock:PrepareAgent",
+        "bedrock:UpdateAgent",
+        "bedrock:DeleteAgent",
+        "bedrock:CreateAgentAlias",
+        "bedrock:GetAgentAlias",
+        "bedrock:ListAgentAliases",
+        "bedrock:DeleteAgentAlias",
+        "bedrock:TagResource",
+        "bedrock:ListFoundationModels"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IamRolesUnderLifecyclePath",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::*:role/balkanid-agent-lifecycle/*"
+    },
+    {
+      "Sid": "CallerIdentity",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    }
+  ]
+}
