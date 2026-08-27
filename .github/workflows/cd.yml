@@ -1,0 +1,129 @@
+name: CD
+
+# Runs terraform apply (or destroy) against a live BalkanID tenant.
+# Apply blocks on scripts/gate.py until the access request is approved or denied —
+# use this to demo IaC waiting on policy before any cloud resources are created.
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Terraform operation
+        required: true
+        default: apply
+        type: choice
+        options:
+          - apply
+          - destroy
+      enable_bedrock:
+        description: Create AWS IAM role + Bedrock agent after gate approval
+        required: true
+        default: false
+        type: boolean
+      agent_name:
+        description: Agent name (Terraform resource name and gate metadata)
+        required: true
+        default: demo-support-agent
+        type: string
+      agent_owner_email:
+        description: Owner email embedded in the access request reason (defaults to employee)
+        required: false
+        type: string
+      agent_purpose:
+        description: Purpose string embedded in the access request reason
+        required: false
+        default: Agent lifecycle CD pipeline demo
+        type: string
+      approval_wait_minutes:
+        description: Max minutes to wait for BalkanID approval before the gate fails (no AWS resources created)
+        required: true
+        default: "120"
+        type: string
+
+concurrency:
+  group: agent-lifecycle-cd-${{ github.event.inputs.agent_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: "${{ github.event.inputs.operation }} (${{ github.event.inputs.agent_name }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(github.event.inputs.approval_wait_minutes) + 20 }}
+    environment: agent-lifecycle
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
+
+      - name: Restore Terraform state
+        uses: actions/cache@v4
+        with:
+          path: |
+            terraform/.terraform
+            terraform/terraform.tfstate
+            terraform/terraform.tfstate.backup
+          key: tfstate-${{ github.event.inputs.agent_name }}-${{ github.ref_name }}
+          restore-keys: |
+            tfstate-${{ github.event.inputs.agent_name }}-
+
+      - name: Configure AWS credentials
+        if: github.event.inputs.enable_bedrock == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Gate + apply
+        if: github.event.inputs.operation == 'apply'
+        env:
+          TF_VAR_enable_bedrock: ${{ github.event.inputs.enable_bedrock }}
+          TF_VAR_balkanid_public_api_url: ${{ secrets.BALKANID_PUBLIC_API_URL }}
+          TF_VAR_api_key_id: ${{ secrets.BALKANID_API_KEY_ID }}
+          TF_VAR_api_key_secret: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          TF_VAR_employee_email: ${{ secrets.BALKANID_EMPLOYEE_EMAIL }}
+          TF_VAR_integration_id: ${{ secrets.BALKANID_INTEGRATION_ID }}
+          TF_VAR_agent_name: ${{ github.event.inputs.agent_name }}
+          TF_VAR_agent_owner_email: ${{ github.event.inputs.agent_owner_email }}
+          TF_VAR_agent_purpose: ${{ github.event.inputs.agent_purpose }}
+          TF_VAR_poll_seconds: "5"
+          TF_VAR_poll_timeout_seconds: ${{ fromJSON(github.event.inputs.approval_wait_minutes) * 60 }}
+        run: |
+          echo "::notice::Terraform apply will block until the BalkanID access request is approved or denied."
+          echo "::notice::Waiting up to ${{ github.event.inputs.approval_wait_minutes }} minutes for approval."
+          echo "::notice::Open your tenant → Access Requests while this job runs."
+          terraform apply -auto-approve -input=false
+
+      - name: Destroy (no BalkanID gate)
+        if: github.event.inputs.operation == 'destroy'
+        env:
+          TF_VAR_enable_bedrock: ${{ github.event.inputs.enable_bedrock }}
+          TF_VAR_balkanid_public_api_url: ${{ secrets.BALKANID_PUBLIC_API_URL }}
+          TF_VAR_api_key_id: ${{ secrets.BALKANID_API_KEY_ID }}
+          TF_VAR_api_key_secret: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          TF_VAR_employee_email: ${{ secrets.BALKANID_EMPLOYEE_EMAIL }}
+          TF_VAR_integration_id: ${{ secrets.BALKANID_INTEGRATION_ID }}
+          TF_VAR_agent_name: ${{ github.event.inputs.agent_name }}
+          TF_VAR_agent_owner_email: ${{ github.event.inputs.agent_owner_email }}
+          TF_VAR_agent_purpose: ${{ github.event.inputs.agent_purpose }}
+        run: terraform destroy -auto-approve -input=false
+
+      - name: Outputs
+        if: github.event.inputs.operation == 'apply'
+        run: terraform output -json

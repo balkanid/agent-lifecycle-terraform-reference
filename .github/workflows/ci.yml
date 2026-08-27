@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile gate script
+        run: python3 -m py_compile scripts/gate.py
+
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.2
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+
+      - name: Init
+        run: terraform init -backend=false
+
+      - name: Validate
+        env:
+          TF_VAR_enable_bedrock: "false"
+          TF_VAR_api_key_id: ci-dummy
+          TF_VAR_api_key_secret: ci-dummy
+          TF_VAR_employee_email: ci@example.com
+          TF_VAR_integration_id: ci-integration
+        run: terraform validate
+
+  iam-policy:
+    name: IAM policy JSON
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate JSON
+        run: jq empty aws/bedrock-agent-lifecycle-iam-policy.json
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: TruffleHog
+        uses: trufflesecurity/trufflehog@v3.97.0
+        with:
+          extra_args: --only-verified
