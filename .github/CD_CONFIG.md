@@ -20,7 +20,7 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 |---|---|---|---|
 | `ENABLE_BEDROCK` | No | `false` | `true` = create IAM role + Bedrock agent after gate approval; `false` = gate-only |
 | `BALKANID_PUBLIC_API_URL` | Yes | — | Public API base URL, e.g. `https://your-tenant.balkanid.app/api/public` |
-| `BALKANID_EMPLOYEE_EMAIL` | Yes | — | Employee the access request is filed for |
+| `BALKANID_AGENT_OWNER_EMAIL` | Yes | — | Employee who will own the agent (`createRequest.employeeEmail`) |
 | `BALKANID_INTEGRATION_ID` | Yes | — | Integration id for `entityFilterGrant` |
 | `APPROVAL_WAIT_MINUTES` | No | `120` | Max minutes the gate polls before failing (no AWS resources created) |
 | `AGENT_NAME` | No | `demo-support-agent` | Agent / Terraform resource name |

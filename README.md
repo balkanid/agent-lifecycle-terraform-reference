@@ -17,11 +17,11 @@ This is **lifecycle and policy enforcement**, not runtime authorization. A separ
 
 ```
 Terraform apply
-    → createRequest (BalkanID Public API)
+    → createRequest AGENT_ACCESS (BalkanID Public API, requestType: agent_access_request)
     → policy evaluation
     → [pending] human approval in BalkanID UI
     → approved → apply continues → AWS Bedrock agent (optional)
-    → register agent + map IAM identity in BalkanID
+    → AWS extractor sync discovers agent in BalkanID; map IAM identity to owner
 ```
 
 Outbound webhooks (`request.actioned`) can notify customer automation when approval completes. This PoV polls the Public API; either approach is valid.
@@ -43,7 +43,7 @@ Outbound webhooks (`request.actioned`) can notify customer automation when appro
 
 ```
 GitHub Actions: terraform apply
-    → gate.py → createRequest
+    → gate.py → createRequest (AGENT_ACCESS)
     → [job waiting — approve/deny in BalkanID UI]
     → approved → apply continues → optional Bedrock resources
     → denied → job fails, nothing in AWS
@@ -76,7 +76,7 @@ Customers can mirror this pattern in their own CI (GitHub Actions, GitLab, Jenki
 
 ```
 agent-lifecycle-terraform-pov/
-├── scripts/gate.py          # Public API gate: createRequest + poll until terminal
+├── scripts/gate.py          # Public API createRequest (AGENT_ACCESS) + poll until terminal
 ├── terraform/               # Blocks apply on gate; optional Bedrock agent resource
 ├── aws/                     # Least-privilege IAM policy for demo AWS accounts
 └── env.example              # Configuration template (copy to .env, never commit)
@@ -110,7 +110,7 @@ agent-lifecycle-terraform-pov/
 
    ```bash
    cp env.example .env
-   # Edit .env: API keys, tenant URL, employee email, integration id, agent metadata
+   # Edit .env: API keys, tenant URL, agent owner email, optional integration id
    ```
 
 2. Run the gate script:
@@ -135,7 +135,7 @@ terraform apply \
   -var="enable_bedrock=false" \
   -var="api_key_id=$API_KEY_ID" \
   -var="api_key_secret=$API_KEY_SECRET" \
-  -var="employee_email=$EMPLOYEE_EMAIL" \
+  -var="agent_owner_email=$AGENT_OWNER_EMAIL" \
   -var="integration_id=$INTEGRATION_ID"
 ```
 
@@ -149,11 +149,11 @@ terraform apply \
   -var="enable_bedrock=true" \
   -var="api_key_id=$API_KEY_ID" \
   -var="api_key_secret=$API_KEY_SECRET" \
-  -var="employee_email=$EMPLOYEE_EMAIL" \
+  -var="agent_owner_email=$AGENT_OWNER_EMAIL" \
   -var="integration_id=$INTEGRATION_ID"
 ```
 
-After a successful apply with Bedrock enabled, register the agent in BalkanID (Discovery → Agents) and map the IAM role identity if your AWS integration is synced.
+After a successful apply with Bedrock enabled, run an AWS integration sync — the agent is discovered via the extractor (no manual agent registration API call).
 
 ### Variables
 
@@ -162,7 +162,7 @@ After a successful apply with Bedrock enabled, register the agent in BalkanID (D
 | `enable_bedrock` | When `false`, only runs the BalkanID gate. Default `false`. |
 | `balkanid_public_api_url` | Public API base URL for your tenant. |
 | `api_key_id`, `api_key_secret` | Employee API key (sensitive). |
-| `employee_email` | Employee the access request is filed for. |
+| `agent_owner_email` | Employee who will own the agent. |
 | `integration_id` | Integration id for `entityFilterGrant`. |
 | `agent_name` | Agent name embedded in the request reason and Bedrock resource. |
 | `agent_owner_email`, `agent_purpose`, `intended_iam_role_arn` | Metadata carried in the request reason string. |
@@ -178,11 +178,11 @@ Attach `aws/bedrock-agent-lifecycle-iam-policy.json` to the role or user running
 
 | Capability | Where it lives | Used by this PoV? |
 |---|---|---|
-| **`createRequest`** | Public API — `pipeline/public-api/pkg/api/graph/schemas/requests.graphqls` | **Yes** — gate script calls this mutation. |
-| **`createAgents`** | Tenant GraphQL only — `pipeline/tenant-command/pkg/api/graph/schema.graphqls` | **No** — not exposed on Public API yet. |
+| **`createRequest` (`AGENT_ACCESS`)** | Public API — unified mutation, `agent_access_request` stored type | **Yes** — gate script calls this. |
+| **`createAgents`** | Tenant GraphQL only — `pipeline/tenant-command/...` | **No** — agents are not pre-created; AWS extractor sync discovers them after external provisioning. |
 | **`request.actioned` webhook** | Outbound webhooks (`pkg/webhooks/topics.go`) | Optional — PoV polls instead. |
 
-The gate encodes agent intent in the access request **reason** field (name, owner, purpose, intended IAM role). After approval, an operator registers the agent in the UI and maps identities. Product work to add `createAgents` / `createAgentRequest` on the Public API is tracked separately (e.g. [EN-8866](https://balkanid.atlassian.net/browse/EN-8866)); this repo does not require that to demonstrate the creation gate.
+The gate sends structured agent intent (`ownerEmail`, `action: CREATE`, `name`, `agentType`, optional `integrationId` and `intendedIamRoleArn`). BalkanID stores the request only — no agent entity is created upfront. After external provisioning and AWS integration sync, the agent appears in BalkanID for owner mapping and governance.
 
 ## Suggested demo narrative (~8 minutes)
 
@@ -191,7 +191,7 @@ The gate encodes agent intent in the access request **reason** field (name, owne
 3. **Policy:** show approval rules; optional second apply that auto-denies.
 4. **Webhook or poll:** show `request.actioned` (or script exiting on approve).
 5. **Payload:** Bedrock agent appears only after approval (if enabled).
-6. **SoR:** agent registered in BalkanID with owner and mapped IAM identity.
+6. **SoR:** AWS extractor sync shows agent in BalkanID with owner and mapped IAM identity.
 7. **Positioning:** BalkanID governs lifecycle; runtime gateways remain separate.
 
 ## Out of scope
@@ -199,7 +199,7 @@ The gate encodes agent intent in the access request **reason** field (name, owne
 - Runtime / invoke-time gateway
 - Bedrock or Kubernetes extractors (discovery of agents created outside BalkanID)
 - Inbound webhook gateway (EN-8766) — Terraform calls Public API directly
-- Production hardening (idempotency, dedicated `create_agent` request type, synchronous policy API)
+- Production hardening (idempotency, ASSIGN/UNASSIGN/DELETE agent access actions, synchronous policy API)
 
 ## Related product work
 

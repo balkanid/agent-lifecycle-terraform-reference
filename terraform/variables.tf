@@ -40,17 +40,21 @@ variable "api_key_secret" {
   sensitive = true
 }
 
-variable "employee_email" {
-  type = string
+variable "agent_owner_email" {
+  type        = string
+  description = "Email of the employee who will own the agent (createRequest employeeEmail)."
 }
 
 variable "integration_id" {
-  type = string
+  type        = string
+  default     = ""
+  description = "Optional integration id for createRequest AGENT_ACCESS payload."
 }
 
-variable "agent_owner_email" {
-  type    = string
-  default = ""
+variable "agent_type" {
+  type        = string
+  default     = "terraform"
+  description = "Agent classification passed to createRequest AGENT_ACCESS payload."
 }
 
 variable "agent_purpose" {

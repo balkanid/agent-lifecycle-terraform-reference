@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Create a BalkanID access request and wait until it is approved or denied.
+"""Create a BalkanID agent access request and wait until approved or denied.
 
-Used as the Terraform gate (null_resource local-exec). Exit 0 only on approval.
+Uses Public API createRequest (requestType: AGENT_ACCESS). Exit 0 only on approval.
 Requires env vars from env.example. No third-party packages.
 """
 
@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 CREATE = """
-mutation CreateRequest($input: CreateRequestInput!) {
+mutation CreateAgentAccessRequest($input: CreateRequestInput!) {
   createRequest(input: $input) {
     id
     success
@@ -34,6 +34,7 @@ query RequestStatus($filter: RequestFilterInput, $first: Int) {
         status
         requestApprovalStatus
         requestProvisioningStatus
+        requestType
       }
     }
   }
@@ -108,39 +109,40 @@ def main() -> int:
     url = env("BALKANID_PUBLIC_API_URL")
     key_id = env("API_KEY_ID")
     secret = env("API_KEY_SECRET")
-    employee = env("EMPLOYEE_EMAIL")
-    integration = env("INTEGRATION_ID")
+    owner = env("AGENT_OWNER_EMAIL")
     agent = os.environ.get("AGENT_NAME", "demo-support-agent").strip()
-    owner = os.environ.get("AGENT_OWNER_EMAIL", employee).strip()
+    agent_type = os.environ.get("AGENT_TYPE", "terraform").strip()
+    integration = os.environ.get("INTEGRATION_ID", "").strip()
     purpose = os.environ.get("AGENT_PURPOSE", "Demo agent lifecycle PoV").strip()
     role_arn = os.environ.get("INTENDED_IAM_ROLE_ARN", "").strip()
     poll_s = int(os.environ.get("POLL_SECONDS", "5"))
     timeout_s = int(os.environ.get("POLL_TIMEOUT_SECONDS", "900"))
 
-    reason = (
-        f"[agent-lifecycle] create agent {agent}; owner={owner}; "
-        f"purpose={purpose}; intended_iam_role={role_arn or 'unset'}"
-    )
-    print(f"creating access request for {employee!r} agent={agent!r}", file=sys.stderr)
+    reason = purpose
+    if not reason:
+        reason = f"Terraform gate for agent {agent}"
 
-    created = gql(
-        url,
-        key_id,
-        secret,
-        CREATE,
-        {
-            "input": {
-                "employeeEmail": employee,
-                "reference": {
-                    "type": "employee",
-                    "value": {"employee": employee},
-                },
-                "entityFilterGrant": {"integration": {"_eq": integration}},
-                "reason": reason,
-                "runAsync": False,
-            }
-        },
-    )["createRequest"]
+    print(f"creating agent access request owner={owner!r} agent={agent!r}", file=sys.stderr)
+
+    agent_access: dict = {
+        "action": "CREATE",
+        "name": agent,
+        "agentType": agent_type,
+    }
+    if integration:
+        agent_access["integrationId"] = integration
+    if role_arn:
+        agent_access["intendedIamRoleArn"] = role_arn
+
+    inp: dict = {
+        "requestType": "AGENT_ACCESS",
+        "employeeEmail": owner,
+        "reason": reason,
+        "runAsync": False,
+        "payload": {"agentAccess": agent_access},
+    }
+
+    created = gql(url, key_id, secret, CREATE, {"input": inp})["createRequest"]
 
     if created.get("stepUpRequired"):
         raise SystemExit("step-up MFA required on createRequest; complete MFA and retry")
@@ -165,7 +167,11 @@ def main() -> int:
         if node:
             status = node.get("status")
             approval = node.get("requestApprovalStatus")
-            print(f"status={status!r} approval={approval!r}", file=sys.stderr)
+            req_type = node.get("requestType")
+            print(
+                f"status={status!r} approval={approval!r} requestType={req_type!r}",
+                file=sys.stderr,
+            )
             outcome = terminal(status, approval)
             if outcome == "approved":
                 print(json.dumps({"request_id": request_id, "status": "approved"}))

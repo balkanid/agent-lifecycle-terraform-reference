@@ -47,7 +47,7 @@ jobs:
           TF_VAR_enable_bedrock: "false"
           TF_VAR_api_key_id: ci-dummy
           TF_VAR_api_key_secret: ci-dummy
-          TF_VAR_employee_email: ci@example.com
+          TF_VAR_agent_owner_email: ci@example.com
           TF_VAR_integration_id: ci-integration
         run: terraform validate
 
