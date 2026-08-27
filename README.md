@@ -49,25 +49,23 @@ GitHub Actions: terraform apply
     → denied → job fails, nothing in AWS
 ```
 
-**Setup:** create GitHub environment `agent-lifecycle` and add secrets per [`.github/CD_SECRETS.md`](.github/CD_SECRETS.md).
+**Setup:** create GitHub environment `agent-lifecycle` and configure **variables + secrets** per [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md).
 
 **Run:** Actions → CD → Run workflow
 
-| Input | Typical demo value |
+| Source | Examples |
 |---|---|
-| `operation` | `apply` (use `destroy` to clean up Bedrock resources) |
-| `enable_bedrock` | `false` first (gate-only); `true` when AWS is configured |
-| `agent_name` | `demo-support-agent` |
-| `approval_wait_minutes` | `120` (increase for slow approvers; max ~360 for one GHA job) |
+| **Environment variables** | `ENABLE_BEDROCK`, `BALKANID_PUBLIC_API_URL`, `APPROVAL_WAIT_MINUTES`, `AGENT_NAME` |
+| **Environment secrets** | `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, `AWS_*` (when Bedrock enabled) |
+| **Per-run workflow inputs** | `operation`, optional overrides for `agent_name`, `approval_wait_minutes` |
 
 While the job is running, open Access Requests in BalkanID and approve or deny.
 
-**How long it waits:** nothing is created in AWS until approval. The gate polls BalkanID every 5 seconds until the request is approved, denied, or **`approval_wait_minutes`** is reached (CD workflow input, default **120 minutes**). The GitHub job timeout is that value + 20 minutes buffer.
-
+**How long it waits:** nothing is created in AWS until approval. The gate polls every 5 seconds until approved, denied, or **`APPROVAL_WAIT_MINUTES`** is reached (environment variable, default **120**). Job timeout = that value + 20 minutes.
 | Layer | Default | Configurable via |
 |---|---|---|
 | Gate poll (`gate.py`) | 15 min locally | `POLL_TIMEOUT_SECONDS` in `.env` or `poll_timeout_seconds` tfvar |
-| CD workflow | **120 min** | `approval_wait_minutes` when you Run workflow |
+| CD workflow | **120 min** | `APPROVAL_WAIT_MINUTES` environment variable (or per-run override) |
 | GitHub job hard limit | 6 hours | GitHub plan / repo settings |
 
 If approval often takes **longer than a few hours**, a single blocking job is the wrong shape — use BalkanID **`request.actioned` webhooks** to resume the pipeline (or re-run CD after approval). Polling for days is not viable in GitHub Actions.
