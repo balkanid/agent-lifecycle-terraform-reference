@@ -14,17 +14,17 @@ resource "null_resource" "balkanid_gate" {
     interpreter = ["/bin/bash", "-lc"]
     command     = "python3 \"${path.module}/../scripts/gate.py\""
     environment = {
-      BALKANID_PUBLIC_API_URL = var.balkanid_public_api_url
-      API_KEY_ID              = var.api_key_id
-      API_KEY_SECRET          = var.api_key_secret
+      BALKANID_PUBLIC_API_URL    = var.balkanid_public_api_url
+      API_KEY_ID                 = var.api_key_id
+      API_KEY_SECRET             = var.api_key_secret
       BALKANID_AGENT_OWNER_EMAIL = var.agent_owner_email
-      INTEGRATION_ID          = var.integration_id
-      AGENT_NAME              = var.agent_name
-      AGENT_TYPE              = var.agent_type
-      AGENT_PURPOSE           = var.agent_purpose
-      INTENDED_IAM_ROLE_ARN   = var.intended_iam_role_arn
-      POLL_SECONDS            = tostring(var.poll_seconds)
-      POLL_TIMEOUT_SECONDS    = tostring(var.poll_timeout_seconds)
+      INTEGRATION_ID             = var.integration_id
+      AGENT_NAME                 = var.agent_name
+      AGENT_TYPE                 = var.agent_type
+      AGENT_PURPOSE              = var.agent_purpose
+      INTENDED_IAM_ROLE_ARN      = var.intended_iam_role_arn
+      POLL_SECONDS               = tostring(var.poll_seconds)
+      POLL_TIMEOUT_SECONDS       = tostring(var.poll_timeout_seconds)
     }
   }
 }
@@ -74,11 +74,11 @@ resource "aws_iam_role_policy" "bedrock_invoke" {
 }
 
 resource "aws_bedrockagent_agent" "this" {
-  count                    = var.enable_bedrock ? 1 : 0
-  agent_name               = var.agent_name
-  agent_resource_role_arn  = aws_iam_role.bedrock_agent[0].arn
-  foundation_model         = var.foundation_model
-  instruction              = var.agent_instruction
+  count                       = var.enable_bedrock ? 1 : 0
+  agent_name                  = var.agent_name
+  agent_resource_role_arn     = aws_iam_role.bedrock_agent[0].arn
+  foundation_model            = var.foundation_model
+  instruction                 = var.agent_instruction
   idle_session_ttl_in_seconds = 600
 
   depends_on = [aws_iam_role_policy.bedrock_invoke]
