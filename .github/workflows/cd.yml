@@ -40,7 +40,8 @@ jobs:
   terraform:
     name: "${{ github.event.inputs.operation }} (${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.AGENT_NAME || 'demo-support-agent' }})"
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ fromJSON(github.event.inputs.approval_wait_minutes != '' && github.event.inputs.approval_wait_minutes || vars.APPROVAL_WAIT_MINUTES || '120') + 20 }}
+    # GitHub expressions do not support arithmetic; keep headroom above APPROVAL_WAIT_MINUTES.
+    timeout-minutes: 360
     environment: agent-lifecycle
     env:
       ENABLE_BEDROCK: ${{ vars.ENABLE_BEDROCK || 'false' }}
@@ -100,8 +101,8 @@ jobs:
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_purpose: ${{ env.AGENT_PURPOSE }}
           TF_VAR_poll_seconds: "5"
-          TF_VAR_poll_timeout_seconds: ${{ fromJSON(env.APPROVAL_WAIT_MINUTES) * 60 }}
         run: |
+          export TF_VAR_poll_timeout_seconds=$((APPROVAL_WAIT_MINUTES * 60))
           echo "::notice::enable_bedrock=${ENABLE_BEDROCK} (environment variable ENABLE_BEDROCK)"
           echo "::notice::Terraform apply will block until the BalkanID access request is approved or denied."
           echo "::notice::Waiting up to ${APPROVAL_WAIT_MINUTES} minutes for approval."
