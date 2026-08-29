@@ -135,7 +135,7 @@ terraform apply \
   -var="enable_bedrock=false" \
   -var="api_key_id=$API_KEY_ID" \
   -var="api_key_secret=$API_KEY_SECRET" \
-  -var="agent_owner_email=$AGENT_OWNER_EMAIL" \
+  -var="agent_owner_email=$BALKANID_AGENT_OWNER_EMAIL" \
   -var="integration_id=$INTEGRATION_ID"
 ```
 
@@ -149,7 +149,7 @@ terraform apply \
   -var="enable_bedrock=true" \
   -var="api_key_id=$API_KEY_ID" \
   -var="api_key_secret=$API_KEY_SECRET" \
-  -var="agent_owner_email=$AGENT_OWNER_EMAIL" \
+  -var="agent_owner_email=$BALKANID_AGENT_OWNER_EMAIL" \
   -var="integration_id=$INTEGRATION_ID"
 ```
 
@@ -162,10 +162,10 @@ After a successful apply with Bedrock enabled, run an AWS integration sync — t
 | `enable_bedrock` | When `false`, only runs the BalkanID gate. Default `false`. |
 | `balkanid_public_api_url` | Public API base URL for your tenant. |
 | `api_key_id`, `api_key_secret` | Employee API key (sensitive). |
-| `agent_owner_email` | Employee who will own the agent. |
-| `integration_id` | Integration id for `entityFilterGrant`. |
-| `agent_name` | Agent name embedded in the request reason and Bedrock resource. |
-| `agent_owner_email`, `agent_purpose`, `intended_iam_role_arn` | Metadata carried in the request reason string. |
+| `agent_owner_email` | Employee who will own the agent (`BALKANID_AGENT_OWNER_EMAIL` in `.env` / CD). |
+| `integration_id` | Optional integration id on the agent access request. |
+| `agent_name` | Agent name in the access request and Bedrock resource. |
+| `agent_purpose`, `intended_iam_role_arn` | Optional metadata on the agent access request. |
 | `foundation_model` | Bedrock model id when `enable_bedrock=true`. |
 
 Pass secrets via `-var`, `TF_VAR_*`, or a gitignored `terraform.tfvars` file.

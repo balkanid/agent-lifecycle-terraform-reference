@@ -17,7 +17,7 @@ resource "null_resource" "balkanid_gate" {
       BALKANID_PUBLIC_API_URL = var.balkanid_public_api_url
       API_KEY_ID              = var.api_key_id
       API_KEY_SECRET          = var.api_key_secret
-      AGENT_OWNER_EMAIL       = var.agent_owner_email
+      BALKANID_AGENT_OWNER_EMAIL = var.agent_owner_email
       INTEGRATION_ID          = var.integration_id
       AGENT_NAME              = var.agent_name
       AGENT_TYPE              = var.agent_type

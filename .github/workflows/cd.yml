@@ -49,7 +49,6 @@ jobs:
       BALKANID_PUBLIC_API_URL: ${{ vars.BALKANID_PUBLIC_API_URL }}
       BALKANID_AGENT_OWNER_EMAIL: ${{ vars.BALKANID_AGENT_OWNER_EMAIL }}
       BALKANID_INTEGRATION_ID: ${{ vars.BALKANID_INTEGRATION_ID }}
-      AGENT_OWNER_EMAIL: ${{ vars.AGENT_OWNER_EMAIL || '' }}
       AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Agent lifecycle CD pipeline demo' }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
     defaults:
@@ -99,7 +98,6 @@ jobs:
           TF_VAR_agent_owner_email: ${{ env.BALKANID_AGENT_OWNER_EMAIL }}
           TF_VAR_integration_id: ${{ env.BALKANID_INTEGRATION_ID }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
-          TF_VAR_agent_owner_email: ${{ env.AGENT_OWNER_EMAIL }}
           TF_VAR_agent_purpose: ${{ env.AGENT_PURPOSE }}
           TF_VAR_poll_seconds: "5"
           TF_VAR_poll_timeout_seconds: ${{ fromJSON(env.APPROVAL_WAIT_MINUTES) * 60 }}
@@ -120,7 +118,6 @@ jobs:
           TF_VAR_agent_owner_email: ${{ env.BALKANID_AGENT_OWNER_EMAIL }}
           TF_VAR_integration_id: ${{ env.BALKANID_INTEGRATION_ID }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
-          TF_VAR_agent_owner_email: ${{ env.AGENT_OWNER_EMAIL }}
           TF_VAR_agent_purpose: ${{ env.AGENT_PURPOSE }}
         run: terraform destroy -auto-approve -input=false
 

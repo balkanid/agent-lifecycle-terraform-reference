@@ -109,7 +109,7 @@ def main() -> int:
     url = env("BALKANID_PUBLIC_API_URL")
     key_id = env("API_KEY_ID")
     secret = env("API_KEY_SECRET")
-    owner = env("AGENT_OWNER_EMAIL")
+    owner = env("BALKANID_AGENT_OWNER_EMAIL")
     agent = os.environ.get("AGENT_NAME", "demo-support-agent").strip()
     agent_type = os.environ.get("AGENT_TYPE", "terraform").strip()
     integration = os.environ.get("INTEGRATION_ID", "").strip()

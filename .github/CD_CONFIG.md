@@ -21,11 +21,10 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 | `ENABLE_BEDROCK` | No | `false` | `true` = create IAM role + Bedrock agent after gate approval; `false` = gate-only |
 | `BALKANID_PUBLIC_API_URL` | Yes | — | Public API base URL, e.g. `https://your-tenant.balkanid.app/api/public` |
 | `BALKANID_AGENT_OWNER_EMAIL` | Yes | — | Employee who will own the agent (`createRequest.employeeEmail`) |
-| `BALKANID_INTEGRATION_ID` | Yes | — | Integration id for `entityFilterGrant` |
+| `BALKANID_INTEGRATION_ID` | No | *(empty)* | Optional integration id on the agent access request |
 | `APPROVAL_WAIT_MINUTES` | No | `120` | Max minutes the gate polls before failing (no AWS resources created) |
 | `AGENT_NAME` | No | `demo-support-agent` | Agent / Terraform resource name |
-| `AGENT_OWNER_EMAIL` | No | *(empty)* | Owner in access request reason; gate falls back to employee email if unset |
-| `AGENT_PURPOSE` | No | `Agent lifecycle CD pipeline demo` | Purpose string in access request reason |
+| `AGENT_PURPOSE` | No | `Agent lifecycle CD pipeline demo` | Purpose string passed as `createRequest.reason` |
 | `AWS_REGION` | No | `us-east-1` | AWS region when `ENABLE_BEDROCK=true` |
 
 ### Why secret vs variable?
