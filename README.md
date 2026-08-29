@@ -39,15 +39,16 @@ Outbound webhooks (`request.actioned`) can notify customer automation when appro
 
 ### CD (manual — demo pipeline waits on BalkanID)
 
-[`.github/workflows/cd.yml`](.github/workflows/cd.yml) runs **`terraform apply` in GitHub Actions**. The job blocks on the same gate as local apply:
+[`.github/workflows/cd.yml`](.github/workflows/cd.yml) runs **`gate.py` in GitHub Actions**, then optionally `terraform apply` when Bedrock is enabled:
 
 ```
-GitHub Actions: terraform apply
-    → gate.py → createRequest (AGENT_ACCESS)
+GitHub Actions: gate.py → createRequest (AGENT_ACCESS)
     → [job waiting — approve/deny in BalkanID UI]
-    → approved → apply continues → optional Bedrock resources
+    → approved → (ENABLE_BEDROCK=true) terraform apply → Bedrock resources
     → denied → job fails, nothing in AWS
 ```
+
+Gate-only (`ENABLE_BEDROCK=false`): the workflow stops after gate approval — no Terraform/AWS step.
 
 **Setup:** create GitHub environment `agent-lifecycle` and configure **variables + secrets** per [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md).
 
@@ -61,12 +62,9 @@ GitHub Actions: terraform apply
 
 While the job is running, open Access Requests in BalkanID and approve or deny.
 
-**How long it waits:** nothing is created in AWS until approval. The gate polls every 5 seconds until approved, denied, or **`APPROVAL_WAIT_MINUTES`** is reached (environment variable, default **120**). Job timeout = that value + 20 minutes.
-| Layer | Default | Configurable via |
-|---|---|---|
-| Gate poll (`gate.py`) | 15 min locally | `POLL_TIMEOUT_SECONDS` in `.env` or `poll_timeout_seconds` tfvar |
-| CD workflow | **120 min** | `APPROVAL_WAIT_MINUTES` environment variable (or per-run override) |
-| GitHub job hard limit | 6 hours | GitHub plan / repo settings |
+**How long it waits:** the gate polls every 5 seconds until approved, denied, or **`APPROVAL_WAIT_MINUTES`** is reached (environment variable, default **120**). Job timeout is 360 minutes.
+
+**GitHub-hosted runners:** if Cloudflare blocks the Public API (HTTP 403), see [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md#cloudflare--waf-github-hosted-runners).
 
 If approval often takes **longer than a few hours**, a single blocking job is the wrong shape — use BalkanID **`request.actioned` webhooks** to resume the pipeline (or re-run CD after approval). Polling for days is not viable in GitHub Actions.
 

@@ -4,6 +4,12 @@ variable "enable_bedrock" {
   description = "When false, only the BalkanID gate runs. Set true to also create a Bedrock agent."
 }
 
+variable "run_balkanid_gate" {
+  type        = bool
+  default     = true
+  description = "When false, skip gate local-exec (CD runs gate.py in the workflow first)."
+}
+
 variable "aws_region" {
   type    = string
   default = "us-east-1"

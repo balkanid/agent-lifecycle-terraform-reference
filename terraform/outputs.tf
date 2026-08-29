@@ -1,5 +1,5 @@
 output "gate_completed" {
-  value = null_resource.balkanid_gate.id
+  value = var.run_balkanid_gate ? null_resource.balkanid_gate[0].id : "skipped"
 }
 
 output "bedrock_agent_id" {

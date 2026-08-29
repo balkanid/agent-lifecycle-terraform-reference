@@ -61,4 +61,16 @@ When you **Run workflow**, you can override:
 
 Bedrock Agents and model access must be enabled in **us-east-1** when `ENABLE_BEDROCK=true`.
 
-State is cached per `AGENT_NAME` + branch (PoV-grade; use an S3 backend for production).
+State is cached per `AGENT_NAME` + branch when `ENABLE_BEDROCK=true` (PoV-grade; use an S3 backend for production).
+
+## Cloudflare / WAF (GitHub-hosted runners)
+
+CD runs `scripts/gate.py` on **GitHub-hosted runners**. Their egress IPs change and are often flagged by Cloudflare managed WAF rules on `*.balkanid.dev` / `*.balkanid.app`.
+
+If the job fails with **HTTP 403** and a Cloudflare “Sorry, you have been blocked” page:
+
+1. **Allowlist GitHub Actions IP ranges** on the tenant zone — fetch current CIDRs from [GitHub meta API](https://api.github.com/meta) (`actions` key), or
+2. Add a **WAF skip rule** for `http.request.uri.path starts_with "/api/public"` when `X-Api-Key-Id` is present, or
+3. Run CD from a **self-hosted runner** with a stable, allowlisted egress IP.
+
+Gate-only runs (`ENABLE_BEDROCK=false`) still need Public API access from the runner — Terraform is not involved until Bedrock is enabled.

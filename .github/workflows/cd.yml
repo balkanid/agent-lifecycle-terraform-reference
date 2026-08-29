@@ -1,7 +1,7 @@
 name: CD
 
-# Runs terraform apply (or destroy) against a live BalkanID tenant.
-# Apply blocks on scripts/gate.py until the access request is approved or denied.
+# Runs the BalkanID gate, then optionally terraform apply for Bedrock resources.
+# Gate-only (ENABLE_BEDROCK=false): workflow runs gate.py and stops — no AWS/Terraform.
 #
 # Configure the agent-lifecycle GitHub environment:
 #   Variables — non-sensitive defaults (see .github/CD_CONFIG.md)
@@ -52,9 +52,6 @@ jobs:
       BALKANID_INTEGRATION_ID: ${{ vars.BALKANID_INTEGRATION_ID }}
       AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Agent lifecycle CD pipeline demo' }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-    defaults:
-      run:
-        working-directory: terraform
 
     steps:
       - uses: actions/checkout@v4
@@ -64,10 +61,12 @@ jobs:
           python-version: "3.12"
 
       - uses: hashicorp/setup-terraform@v3
+        if: env.ENABLE_BEDROCK == 'true'
         with:
           terraform_version: 1.12.2
 
       - name: Restore Terraform state
+        if: env.ENABLE_BEDROCK == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -86,13 +85,32 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform init
-        run: terraform init -input=false
-
-      - name: Gate + apply
+      - name: BalkanID gate
         if: github.event.inputs.operation == 'apply'
         env:
-          TF_VAR_enable_bedrock: ${{ env.ENABLE_BEDROCK }}
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          INTEGRATION_ID: ${{ env.BALKANID_INTEGRATION_ID }}
+          AGENT_TYPE: terraform
+        run: |
+          export POLL_SECONDS=5
+          export POLL_TIMEOUT_SECONDS=$((APPROVAL_WAIT_MINUTES * 60))
+          echo "::notice::enable_bedrock=${ENABLE_BEDROCK}"
+          echo "::notice::Waiting up to ${APPROVAL_WAIT_MINUTES} minutes for approval."
+          echo "::notice::Open your tenant → Access Requests while this job runs."
+          python3 scripts/gate.py
+
+      - name: Terraform init
+        if: env.ENABLE_BEDROCK == 'true'
+        working-directory: terraform
+        run: terraform init -input=false
+
+      - name: Terraform apply (Bedrock)
+        if: github.event.inputs.operation == 'apply' && env.ENABLE_BEDROCK == 'true'
+        working-directory: terraform
+        env:
+          TF_VAR_enable_bedrock: "true"
+          TF_VAR_run_balkanid_gate: "false"
           TF_VAR_balkanid_public_api_url: ${{ env.BALKANID_PUBLIC_API_URL }}
           TF_VAR_api_key_id: ${{ secrets.BALKANID_API_KEY_ID }}
           TF_VAR_api_key_secret: ${{ secrets.BALKANID_API_KEY_SECRET }}
@@ -100,19 +118,18 @@ jobs:
           TF_VAR_integration_id: ${{ env.BALKANID_INTEGRATION_ID }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_purpose: ${{ env.AGENT_PURPOSE }}
-          TF_VAR_poll_seconds: "5"
-        run: |
-          export TF_VAR_poll_timeout_seconds=$((APPROVAL_WAIT_MINUTES * 60))
-          echo "::notice::enable_bedrock=${ENABLE_BEDROCK} (environment variable ENABLE_BEDROCK)"
-          echo "::notice::Terraform apply will block until the BalkanID access request is approved or denied."
-          echo "::notice::Waiting up to ${APPROVAL_WAIT_MINUTES} minutes for approval."
-          echo "::notice::Open your tenant → Access Requests while this job runs."
-          terraform apply -auto-approve -input=false
+        run: terraform apply -auto-approve -input=false
 
-      - name: Destroy (no BalkanID gate)
-        if: github.event.inputs.operation == 'destroy'
+      - name: Gate-only complete
+        if: github.event.inputs.operation == 'apply' && env.ENABLE_BEDROCK != 'true'
+        run: echo "::notice::Gate approved. ENABLE_BEDROCK=false — no AWS resources to apply."
+
+      - name: Terraform destroy
+        if: github.event.inputs.operation == 'destroy' && env.ENABLE_BEDROCK == 'true'
+        working-directory: terraform
         env:
-          TF_VAR_enable_bedrock: ${{ env.ENABLE_BEDROCK }}
+          TF_VAR_enable_bedrock: "true"
+          TF_VAR_run_balkanid_gate: "false"
           TF_VAR_balkanid_public_api_url: ${{ env.BALKANID_PUBLIC_API_URL }}
           TF_VAR_api_key_id: ${{ secrets.BALKANID_API_KEY_ID }}
           TF_VAR_api_key_secret: ${{ secrets.BALKANID_API_KEY_SECRET }}
@@ -122,6 +139,11 @@ jobs:
           TF_VAR_agent_purpose: ${{ env.AGENT_PURPOSE }}
         run: terraform destroy -auto-approve -input=false
 
+      - name: Destroy skipped (gate-only)
+        if: github.event.inputs.operation == 'destroy' && env.ENABLE_BEDROCK != 'true'
+        run: echo "::notice::ENABLE_BEDROCK=false — no Terraform state/AWS resources to destroy."
+
       - name: Outputs
-        if: github.event.inputs.operation == 'apply'
+        if: github.event.inputs.operation == 'apply' && env.ENABLE_BEDROCK == 'true'
+        working-directory: terraform
         run: terraform output -json

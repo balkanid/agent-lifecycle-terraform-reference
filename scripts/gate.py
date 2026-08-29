@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -56,6 +57,34 @@ DENIED = {
     "failed",
 }
 
+USER_AGENT = (
+    "balkanid-agent-lifecycle-pov/1.0 "
+    "(+https://github.com/balkanid/agent-lifecycle-terraform-pov)"
+)
+
+
+def http_error_message(code: int, detail: str) -> str:
+    lower = detail.lower()
+    if code == 403 and any(token in lower for token in ("cloudflare", "cf-ray", "blocked")):
+        ray = ""
+        match = re.search(r"Ray ID[^<]*<strong[^>]*>([^<]+)</strong>", detail, re.I)
+        if match:
+            ray = f" (Ray ID: {match.group(1).strip()})"
+        return (
+            f"HTTP 403: Cloudflare blocked this request{ray}. "
+            "GitHub-hosted runners are often blocked by WAF — allowlist GitHub Actions "
+            "IP ranges on your tenant domain or add a WAF skip rule for /api/public "
+            "when X-Api-Key-Id is present. See .github/CD_CONFIG.md."
+        )
+    if "<html" in lower:
+        return (
+            f"HTTP {code}: non-JSON response from public API "
+            "(body looks like HTML; check URL and edge/WAF rules)"
+        )
+    if len(detail) > 800:
+        detail = detail[:800] + "..."
+    return f"HTTP {code} from public API: {detail}"
+
 
 def env(name: str, default: str | None = None) -> str:
     val = os.environ.get(name, default)
@@ -72,6 +101,7 @@ def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict
         method="POST",
         headers={
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
             "X-Api-Key-Id": key_id,
             "X-Api-Key-Secret": secret,
         },
@@ -81,7 +111,7 @@ def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict
             payload = json.loads(resp.read().decode())
     except urllib.error.HTTPError as err:
         detail = err.read().decode() if err.fp else ""
-        raise SystemExit(f"HTTP {err.code} from public API: {detail}") from err
+        raise SystemExit(http_error_message(err.code, detail)) from err
     if payload.get("errors"):
         raise SystemExit(json.dumps(payload["errors"], indent=2))
     data = payload.get("data")

@@ -4,6 +4,8 @@ locals {
 }
 
 resource "null_resource" "balkanid_gate" {
+  count = var.run_balkanid_gate ? 1 : 0
+
   triggers = {
     agent_name = var.agent_name
     # bump to force a new request on re-apply
