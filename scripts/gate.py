@@ -63,7 +63,27 @@ USER_AGENT = (
 )
 
 
-def http_error_message(code: int, detail: str) -> str:
+def load_dotenv() -> None:
+    """Load repo-root .env when vars are not already exported (local dev convenience)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, ".env")
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            if key:
+                os.environ[key] = value
+
+
+def http_error_message(code: int, detail: str, url: str = "") -> str:
     lower = detail.lower()
     if code == 403 and any(token in lower for token in ("cloudflare", "cf-ray", "blocked")):
         ray = ""
@@ -81,6 +101,14 @@ def http_error_message(code: int, detail: str) -> str:
             f"HTTP {code}: non-JSON response from public API "
             "(body looks like HTML; check URL and edge/WAF rules)"
         )
+    if code == 404:
+        hint = (
+            " Public API is served on the platform host (e.g. https://balkanid.dev/api/public), "
+            "not tenant subdomains like https://qa.balkanid.dev. "
+            "If .env is correct, your shell may still export a stale BALKANID_PUBLIC_API_URL — "
+            "run `echo $BALKANID_PUBLIC_API_URL` or rely on gate.py loading .env automatically."
+        )
+        return f"HTTP 404 from public API: {detail.strip()}.{hint}"
     if len(detail) > 800:
         detail = detail[:800] + "..."
     return f"HTTP {code} from public API: {detail}"
@@ -111,7 +139,7 @@ def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict
             payload = json.loads(resp.read().decode())
     except urllib.error.HTTPError as err:
         detail = err.read().decode() if err.fp else ""
-        raise SystemExit(http_error_message(err.code, detail)) from err
+        raise SystemExit(http_error_message(err.code, detail, url)) from err
     if payload.get("errors"):
         raise SystemExit(json.dumps(payload["errors"], indent=2))
     data = payload.get("data")
@@ -136,6 +164,7 @@ def terminal(status: str | None, approval: str | None) -> str | None:
 
 
 def main() -> int:
+    load_dotenv()
     url = env("BALKANID_PUBLIC_API_URL")
     key_id = env("API_KEY_ID")
     secret = env("API_KEY_SECRET")
@@ -152,6 +181,7 @@ def main() -> int:
     if not reason:
         reason = f"Terraform gate for agent {agent}"
 
+    print(f"public API url={url}", file=sys.stderr)
     print(f"creating agent access request owner={owner!r} agent={agent!r}", file=sys.stderr)
 
     agent_access: dict = {
