@@ -73,7 +73,7 @@ Set `BALKANID_INTEGRATION_ID` to the AWS integration in BalkanID. Disable step 4
 3. Actions → **CD** → Run workflow → `apply`.
 4. Approve or deny in BalkanID while the job waits.
 5. To test Bedrock: set `ENABLE_BEDROCK=true`, `BALKANID_INTEGRATION_ID`, add AWS secrets, run `apply` again — after Terraform, CD triggers integration sync automatically.
-6. Run `destroy` to tear down AWS resources (uses cached Terraform state).
+6. Run `destroy` to tear down AWS resources (uses cached Terraform state). When `AGENT_BACKEND=agentcore`, CD also runs `scripts/cleanup-agentcore-memory.sh` to delete orphan Memory resources that Terraform harness destroy may leave behind.
 
 Bedrock and AgentCore must be enabled in your chosen region when `ENABLE_BEDROCK=true`. Default **`AGENT_BACKEND=agentcore`** works on new AWS accounts; use `classic` only if your account has prior Bedrock Agents Classic usage ([maintenance mode FAQ](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html)).
 

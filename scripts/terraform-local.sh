@@ -121,16 +121,25 @@ case "$cmd" in
     write_aws_credentials_file "$cred_file"
     cd "$root/terraform/bedrock"
     terraform init -input=false
-    exec terraform destroy -auto-approve \
+    terraform destroy -auto-approve \
       -var="aws_credentials_file=${cred_file}" \
       -var="aws_account_id=${account_id}" \
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
       "$@"
+
+    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$backend_lc" == "agentcore" ]]; then
+      echo "==> AgentCore memory cleanup (orphans after harness destroy)" >&2
+      "$root/scripts/cleanup-agentcore-memory.sh"
+    fi
+    ;;
+  cleanup-agentcore-memory)
+    exec "$root/scripts/cleanup-agentcore-memory.sh" "$@"
     ;;
   *)
-    echo "Usage: $0 {apply-bedrock|apply-gate|plan-bedrock|destroy-bedrock}" >&2
+    echo "Usage: $0 {apply-bedrock|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory}" >&2
     exit 1
     ;;
 esac

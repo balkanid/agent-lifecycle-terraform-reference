@@ -153,6 +153,25 @@ Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your a
 
 `apply-bedrock` runs gate → Terraform → **`syncIntegration`** when `TRIGGER_INTEGRATION_SYNC=true` (default) and `INTEGRATION_ID` is set.
 
+### Teardown and re-runs (AgentCore)
+
+```bash
+# Recommended loop when reusing the same AGENT_NAME
+./scripts/terraform-local.sh destroy-bedrock   # terraform destroy + memory cleanup
+./scripts/terraform-local.sh apply-bedrock
+```
+
+`destroy-bedrock` runs Terraform destroy, then **`cleanup-agentcore-memory.sh`** when `AGENT_BACKEND=agentcore`. AgentCore harness delete does not always remove the managed **Memory** resource; a failed harness create can also leave a memory named `demo_support_agent` (hyphens in `AGENT_NAME` become underscores). Without cleanup, the next apply fails with `Memory with name … already exists`.
+
+Orphan cleanup only:
+
+```bash
+./scripts/terraform-local.sh cleanup-agentcore-memory
+# or: ./scripts/cleanup-agentcore-memory.sh
+```
+
+Alternatively, use a fresh `AGENT_NAME` each run (e.g. `demo-support-agent-2`).
+
 ### Variables
 
 | Variable | Description |

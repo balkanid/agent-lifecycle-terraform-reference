@@ -33,6 +33,8 @@
         "bedrock-agentcore:UpdateAgentRuntime",
         "bedrock-agentcore:DeleteAgentRuntime",
         "bedrock-agentcore:CreateMemory",
+        "bedrock-agentcore:GetMemory",
+        "bedrock-agentcore:ListMemories",
         "bedrock-agentcore:UpdateMemory",
         "bedrock-agentcore:DeleteMemory"
       ],
