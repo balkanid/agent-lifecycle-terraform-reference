@@ -61,16 +61,28 @@ case "$cmd" in
     echo "==> BalkanID gate (gate.py)" >&2
     python3 "$root/scripts/gate.py"
 
-    echo "==> Terraform Bedrock stack" >&2
+    echo "==> Terraform Bedrock stack (backend=${AGENT_BACKEND:-agentcore})" >&2
     cd "$root/terraform/bedrock"
     terraform init -input=false
-    exec terraform apply -auto-approve \
+    terraform apply -auto-approve \
       -var="aws_credentials_file=${cred_file}" \
       -var="aws_account_id=${account_id}" \
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
       "$@"
+
+    trigger="${TRIGGER_INTEGRATION_SYNC:-true}"
+    if [[ "${trigger,,}" =~ ^(0|false|no|off)$ ]]; then
+      echo "==> TRIGGER_INTEGRATION_SYNC disabled; skipping sync" >&2
+      exit 0
+    fi
+    if [[ -z "${INTEGRATION_ID:-}" ]]; then
+      echo "==> INTEGRATION_ID not set — skipping post-apply sync" >&2
+      exit 0
+    fi
+    echo "==> Trigger integration sync (integration_id=${INTEGRATION_ID})" >&2
+    python3 "$root/scripts/trigger_sync.py"
     ;;
   apply-gate)
     cd "$root/terraform"

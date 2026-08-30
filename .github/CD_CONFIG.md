@@ -20,9 +20,10 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 |---|---|---|---|
 | `ENABLE_BEDROCK` | No | `false` | `true` = create IAM role + AWS agent after gate approval; `false` = gate-only |
 | `AGENT_BACKEND` | No | `agentcore` | `agentcore` (AgentCore harness, new accounts) or `classic` (Bedrock Agents Classic, allowlisted accounts) |
-| `BALKANID_PUBLIC_API_URL` | Yes | — | Public API base URL, e.g. `https://your-tenant.balkanid.app/api/public` |
+| `TRIGGER_INTEGRATION_SYNC` | No | `true` | After successful Terraform apply, call Public API `syncIntegration` for `BALKANID_INTEGRATION_ID` |
+| `BALKANID_PUBLIC_API_URL` | Yes | — | Public API base URL, e.g. `https://balkanid.dev/api/public` |
 | `BALKANID_AGENT_OWNER_EMAIL` | Yes | — | Employee who will own the agent (`createRequest.employeeEmail`) |
-| `BALKANID_INTEGRATION_ID` | No | *(empty)* | Optional integration id on the agent access request |
+| `BALKANID_INTEGRATION_ID` | When sync enabled | *(empty)* | AWS integration id — used on the access request and for post-apply `syncIntegration` |
 | `APPROVAL_WAIT_MINUTES` | No | `120` | Max minutes the gate polls before failing (no AWS resources created) |
 | `AGENT_NAME` | No | `demo-support-agent` | Agent / Terraform resource name |
 | `AGENT_PURPOSE` | No | `Agent lifecycle CD pipeline demo` | Purpose string passed as `createRequest.reason` |
@@ -47,10 +48,23 @@ When you **Run workflow**, you can override:
 | Workflow input | Overrides variable |
 |---|---|
 | `agent_name` | `AGENT_NAME` |
+| `agent_backend` | `AGENT_BACKEND` (`agentcore` or `classic`) |
 | `approval_wait_minutes` | `APPROVAL_WAIT_MINUTES` |
 
 `operation` (`apply` / `destroy`) is always chosen per run.  
-`ENABLE_BEDROCK` and other settings come from environment variables only.
+`ENABLE_BEDROCK`, `TRIGGER_INTEGRATION_SYNC`, and other settings come from environment variables unless overridden above.
+
+## End-to-end apply flow (`ENABLE_BEDROCK=true`)
+
+```
+CD run (apply)
+  1. gate.py          → createRequest (AGENT_ACCESS) + poll until approved/denied
+  2. if denied        → job fails (no AWS resources)
+  3. if approved      → terraform apply (AGENT_BACKEND=agentcore|classic)
+  4. if sync enabled  → syncIntegration(integrationId) — AWS extractor discovers new agent
+```
+
+Set `BALKANID_INTEGRATION_ID` to the AWS integration in BalkanID. Disable step 4 with `TRIGGER_INTEGRATION_SYNC=false`.
 
 ## Demo flow
 
@@ -58,7 +72,7 @@ When you **Run workflow**, you can override:
 2. Set secrets: API key id + secret.
 3. Actions → **CD** → Run workflow → `apply`.
 4. Approve or deny in BalkanID while the job waits.
-5. To test Bedrock: set `ENABLE_BEDROCK=true`, add AWS secrets, run `apply` again.
+5. To test Bedrock: set `ENABLE_BEDROCK=true`, `BALKANID_INTEGRATION_ID`, add AWS secrets, run `apply` again — after Terraform, CD triggers integration sync automatically.
 6. Run `destroy` to tear down AWS resources (uses cached Terraform state).
 
 Bedrock and AgentCore must be enabled in your chosen region when `ENABLE_BEDROCK=true`. Default **`AGENT_BACKEND=agentcore`** works on new AWS accounts; use `classic` only if your account has prior Bedrock Agents Classic usage ([maintenance mode FAQ](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html)).

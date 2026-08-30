@@ -31,8 +31,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Compile gate script
-        run: python3 -m py_compile scripts/gate.py
+      - name: Compile gate scripts
+        run: python3 -m py_compile scripts/gate.py scripts/trigger_sync.py
 
   terraform:
     name: Terraform
