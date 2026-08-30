@@ -11,7 +11,7 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 |---|---|---|
 | `BALKANID_API_KEY_ID` | Always | Employee API key id |
 | `BALKANID_API_KEY_SECRET` | Always | Employee API key secret |
-| `AWS_ACCESS_KEY_ID` | When `PROVISION_AWS_AGENT=true` | IAM principal with `aws/bedrock-agent-lifecycle-iam-policy.json` |
+| `AWS_ACCESS_KEY_ID` | When `PROVISION_AWS_AGENT=true` | IAM user with **full** [`aws/bedrock-agent-lifecycle-iam-policy.json`](../aws/bedrock-agent-lifecycle-iam-policy.json) — replace the entire policy in AWS; see [`aws/PERMISSIONS.md`](../aws/PERMISSIONS.md) |
 | `AWS_SECRET_ACCESS_KEY` | When `PROVISION_AWS_AGENT=true` | Matching AWS secret |
 
 ## Variables (non-sensitive — visible in logs)

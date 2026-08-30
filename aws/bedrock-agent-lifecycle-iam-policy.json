@@ -16,6 +16,7 @@
         "bedrock:ListAgentAliases",
         "bedrock:DeleteAgentAlias",
         "bedrock:TagResource",
+        "bedrock:UntagResource",
         "bedrock:ListFoundationModels",
         "bedrock:GetFoundationModel"
       ],
@@ -67,8 +68,10 @@
       "Effect": "Allow",
       "Action": [
         "iam:CreateRole",
-        "iam:DeleteRole",
         "iam:GetRole",
+        "iam:UpdateRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:DeleteRole",
         "iam:GetRolePolicy",
         "iam:PutRolePolicy",
         "iam:DeleteRolePolicy",
@@ -77,9 +80,16 @@
         "iam:TagRole",
         "iam:UntagRole",
         "iam:ListRolePolicies",
-        "iam:ListAttachedRolePolicies"
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole"
       ],
       "Resource": "arn:aws:iam::*:role/balkanid-agent-lifecycle/*"
+    },
+    {
+      "Sid": "IamInstanceProfilesForRoleDelete",
+      "Effect": "Allow",
+      "Action": "iam:RemoveRoleFromInstanceProfile",
+      "Resource": "arn:aws:iam::*:instance-profile/*"
     },
     {
       "Sid": "PassExecutionRolesToBedrock",

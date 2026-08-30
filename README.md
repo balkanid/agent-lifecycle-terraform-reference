@@ -192,7 +192,7 @@ Pass secrets via `-var`, `TF_VAR_*`, or a gitignored `terraform.tfvars` file.
 
 ## AWS IAM policy
 
-Attach `aws/bedrock-agent-lifecycle-iam-policy.json` to the role or user running Terraform. It scopes IAM role creation to path `/balkanid-agent-lifecycle/` and allows both Bedrock Agents Classic and AgentCore harness APIs. Adjust the account id in `INTENDED_IAM_ROLE_ARN` / tfvars for your environment.
+Attach [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecycle-iam-policy.json) to the role or user running Terraform. **Replace the whole policy in IAM** (do not merge actions incrementally) — see [`aws/PERMISSIONS.md`](aws/PERMISSIONS.md). It scopes IAM role management to path `/balkanid-agent-lifecycle/` and allows both Bedrock Agents Classic and AgentCore harness APIs.
 
 ## How this uses BalkanID APIs today
 
