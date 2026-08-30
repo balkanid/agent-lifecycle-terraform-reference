@@ -94,6 +94,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Workflow revision
+        if: env.PROVISION_AWS_AGENT == 'true'
+        run: |
+          echo "::notice::git=$(git rev-parse --short HEAD) — start a new 'Run workflow' dispatch to pick up fixes on main; 'Re-run failed jobs' keeps the original commit"
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

@@ -38,6 +38,7 @@ agent_name="${AGENT_NAME:-demo-support-agent}"
 harness_name="${agent_name//-/_}"
 role_name="${agent_name}"
 role_path="/balkanid-agent-lifecycle/"
+harness_in_state=false
 
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 export AWS_DEFAULT_REGION="$region"
@@ -183,6 +184,25 @@ for h in json.load(sys.stdin).get('harnesses') or []:
   if [[ "$in_state" == true && -z "$matches" ]]; then
     echo "Harness ${harness_name} is in Terraform state but absent in AWS — removing from state."
     (cd "$tf_dir" && terraform state rm "$harness_resource" 2>/dev/null || true)
+    in_state=false
+  fi
+
+  harness_in_state=false
+  if state_has "$harness_resource"; then
+    harness_in_state=true
+  fi
+}
+
+reset_iam_for_fresh_apply() {
+  local role_resource="$1"
+  echo "Harness not in Terraform state — resetting IAM role for a clean apply (typical after destroy or partial teardown)."
+  remove_iam_from_terraform_state "$role_resource"
+  if aws_cli iam list-role-policies --role-name "$role_name" --no-cli-pager >/dev/null 2>&1; then
+    echo "Deleting IAM role ${role_name} from AWS so apply can recreate it."
+    delete_iam_role_in_aws
+    echo "IAM role ${role_name} deleted."
+  else
+    echo "IAM role ${role_name} not present in AWS (or not listable) — apply will create it."
   fi
 }
 
@@ -192,9 +212,15 @@ delete_harness_if_orphan_or_failed
 
 backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
 if [[ "$backend_lc" == "agentcore" ]]; then
-  reconcile_iam_role "aws_iam_role.agentcore[0]"
+  role_resource="aws_iam_role.agentcore[0]"
 else
-  reconcile_iam_role "aws_iam_role.bedrock_classic[0]"
+  role_resource="aws_iam_role.bedrock_classic[0]"
+fi
+
+if [[ "$harness_in_state" == true ]]; then
+  reconcile_iam_role "$role_resource"
+else
+  reset_iam_for_fresh_apply "$role_resource"
 fi
 
 echo "==> AgentCore memory cleanup"

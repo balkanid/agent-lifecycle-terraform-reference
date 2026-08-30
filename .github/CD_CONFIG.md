@@ -82,6 +82,8 @@ Bedrock and AgentCore must be enabled in your chosen region when `PROVISION_AWS_
 
 State is cached per `AGENT_NAME` + branch when `PROVISION_AWS_AGENT=true` (PoV-grade; use an S3 backend for production).
 
+**Re-run vs new dispatch:** GitHub **“Re-run failed jobs”** reuses the commit from the original run. After fixes land on `main`, use **Actions → CD → Run workflow** (new dispatch) so the job checks out the latest code.
+
 ## Cloudflare / WAF (GitHub-hosted runners)
 
 CD runs `scripts/gate.py` on **GitHub-hosted runners**. Their egress IPs change and are often flagged by Cloudflare managed WAF rules on `*.balkanid.dev` / `*.balkanid.app`.
