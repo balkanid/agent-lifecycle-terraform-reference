@@ -163,13 +163,13 @@ Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your a
 ./scripts/terraform-local.sh apply-bedrock    # gate + memory cleanup + apply + sync
 ```
 
-`apply-bedrock` and `destroy-bedrock` both run **`cleanup-agentcore-memory.sh`** when `AGENT_BACKEND=agentcore`. Failed harness creates leave a Memory named `demo_support_agent` in AWS; the next apply hits `Memory with name … already exists` until that memory is deleted.
+`apply-bedrock` and CD (before apply) run **`cleanup-agentcore-before-apply.sh`** when `AGENT_BACKEND=agentcore`. That reconciles partial failed applies: deletes CREATE_FAILED harnesses, orphan IAM roles not in Terraform state, and reserved Memory names.
 
 Orphan cleanup only:
 
 ```bash
-./scripts/terraform-local.sh cleanup-agentcore-memory
-# or: ./scripts/cleanup-agentcore-memory.sh
+./scripts/terraform-local.sh cleanup-agentcore-before-apply
+# memory only: ./scripts/cleanup-agentcore-memory.sh
 ```
 
 Alternatively, use a fresh `AGENT_NAME` each run (e.g. `demo-support-agent-2`).

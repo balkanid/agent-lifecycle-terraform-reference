@@ -63,8 +63,8 @@ case "$cmd" in
 
     backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
     if [[ "$backend_lc" == "agentcore" ]]; then
-      echo "==> AgentCore memory cleanup (before apply — clears orphans from prior failed creates)" >&2
-      "$root/scripts/cleanup-agentcore-memory.sh"
+      echo "==> AgentCore pre-apply reconciliation (orphan harness/role/memory from prior failed creates)" >&2
+      "$root/scripts/cleanup-agentcore-before-apply.sh"
     fi
 
     echo "==> Terraform Bedrock stack (backend=${AGENT_BACKEND:-agentcore})" >&2
@@ -144,8 +144,11 @@ case "$cmd" in
   cleanup-agentcore-memory)
     exec "$root/scripts/cleanup-agentcore-memory.sh" "$@"
     ;;
+  cleanup-agentcore-before-apply)
+    exec "$root/scripts/cleanup-agentcore-before-apply.sh" "$@"
+    ;;
   *)
-    echo "Usage: $0 {apply-bedrock|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory}" >&2
+    echo "Usage: $0 {apply-bedrock|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-before-apply}" >&2
     exit 1
     ;;
 esac

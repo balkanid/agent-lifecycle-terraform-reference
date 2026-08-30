@@ -156,14 +156,15 @@ jobs:
         working-directory: terraform/bedrock
         run: terraform init -input=false
 
-      - name: AgentCore memory cleanup (before apply)
+      - name: AgentCore pre-apply reconciliation
         if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT == 'true' && env.AGENT_BACKEND == 'agentcore'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.AWS_REGION }}
           AGENT_NAME: ${{ env.AGENT_NAME }}
-        run: bash scripts/cleanup-agentcore-memory.sh
+          AGENT_BACKEND: ${{ env.AGENT_BACKEND }}
+        run: bash scripts/cleanup-agentcore-before-apply.sh
 
       - name: Terraform apply (AWS agent)
         if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT == 'true'
