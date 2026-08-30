@@ -72,11 +72,13 @@ case "$cmd" in
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
       "$@"
 
-    trigger="${TRIGGER_INTEGRATION_SYNC:-true}"
-    if [[ "${trigger,,}" =~ ^(0|false|no|off)$ ]]; then
-      echo "==> TRIGGER_INTEGRATION_SYNC disabled; skipping sync" >&2
-      exit 0
-    fi
+    trigger_lc="$(printf '%s' "${TRIGGER_INTEGRATION_SYNC:-true}" | tr '[:upper:]' '[:lower:]')"
+    case "$trigger_lc" in
+      0|false|no|off)
+        echo "==> TRIGGER_INTEGRATION_SYNC disabled; skipping sync" >&2
+        exit 0
+        ;;
+    esac
     if [[ -z "${INTEGRATION_ID:-}" ]]; then
       echo "==> INTEGRATION_ID not set — skipping post-apply sync" >&2
       exit 0
