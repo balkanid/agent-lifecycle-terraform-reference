@@ -11,8 +11,17 @@ set +a
 
 unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_SDK_LOAD_CONFIG
 
-if ! command -v aws >/dev/null 2>&1; then
+aws_cli() {
+  if [[ -n "${AWS_CLI:-}" ]]; then
+    "$AWS_CLI" "$@"
+    return
+  fi
+  command aws "$@"
+}
+
+if ! command -v aws >/dev/null 2>&1 && [[ -z "${AWS_CLI:-}" ]]; then
   echo "aws CLI is required (bedrock-agentcore-control list-memories / delete-memory)" >&2
+  echo "Install awscli or set AWS_CLI to the binary path in .env" >&2
   exit 1
 fi
 
@@ -24,24 +33,25 @@ fi
 region="${AWS_REGION:-us-east-1}"
 agent_name="${AGENT_NAME:-demo-support-agent}"
 harness_name="${agent_name//-/_}"
-wait_seconds="${AGENTCORE_MEMORY_DELETE_WAIT_SECONDS:-90}"
+wait_seconds="${AGENTCORE_MEMORY_DELETE_WAIT_SECONDS:-120}"
 
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 export AWS_DEFAULT_REGION="$region"
 
 list_matching_memory_ids() {
-  aws bedrock-agentcore-control list-memories \
+  # Match by memory name (CreateMemory collision) and by id prefix (managed memory ARN suffix).
+  aws_cli bedrock-agentcore-control list-memories \
     --region "$region" \
     --no-cli-pager \
-    --query "memories[?starts_with(id, '${harness_name}')].id" \
-    --output text
+    --query "memories[?name=='${harness_name}' || starts_with(id, '${harness_name}') || starts_with(id, '${harness_name}-')].id" \
+    --output text 2>/dev/null || true
 }
 
 wait_for_memory_gone() {
   local memory_id="$1"
   local elapsed=0
   while (( elapsed < wait_seconds )); do
-    if ! aws bedrock-agentcore-control get-memory \
+    if ! aws_cli bedrock-agentcore-control get-memory \
       --memory-id "$memory_id" \
       --region "$region" \
       --no-cli-pager >/dev/null 2>&1; then
@@ -50,29 +60,32 @@ wait_for_memory_gone() {
     sleep 5
     elapsed=$((elapsed + 5))
   done
-  echo "warning: memory ${memory_id} still present after ${wait_seconds}s (delete may still be in progress)" >&2
-  return 0
+  echo "error: memory ${memory_id} still present after ${wait_seconds}s — name may stay reserved until delete completes" >&2
+  return 1
 }
 
-memory_ids="$(list_matching_memory_ids || true)"
+memory_ids="$(list_matching_memory_ids)"
 memory_ids="${memory_ids//$'\t'/ }"
 memory_ids="${memory_ids//  / }"
 memory_ids="${memory_ids#None}"
 memory_ids="${memory_ids%None}"
-memory_ids="$(echo "$memory_ids" | xargs || true)"
+memory_ids="$(echo "$memory_ids" | xargs 2>/dev/null || true)"
 
 if [[ -z "$memory_ids" ]]; then
-  echo "No AgentCore memories matched prefix '${harness_name}' in ${region}."
+  echo "No AgentCore memories matched name/id '${harness_name}' in ${region}."
   exit 0
 fi
 
 echo "Deleting AgentCore memories matching '${harness_name}': ${memory_ids}"
 for memory_id in $memory_ids; do
   echo "  -> delete-memory ${memory_id}"
-  aws bedrock-agentcore-control delete-memory \
+  if ! aws_cli bedrock-agentcore-control delete-memory \
     --memory-id "$memory_id" \
     --region "$region" \
-    --no-cli-pager >/dev/null
+    --no-cli-pager >/dev/null; then
+    echo "error: failed to delete memory ${memory_id} (check bedrock-agentcore:DeleteMemory IAM permission)" >&2
+    exit 1
+  fi
   wait_for_memory_gone "$memory_id"
 done
 

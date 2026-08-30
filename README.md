@@ -160,10 +160,10 @@ Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your a
 ```bash
 # Recommended loop when reusing the same AGENT_NAME
 ./scripts/terraform-local.sh destroy-bedrock   # terraform destroy + memory cleanup
-./scripts/terraform-local.sh apply-bedrock
+./scripts/terraform-local.sh apply-bedrock    # gate + memory cleanup + apply + sync
 ```
 
-`destroy-bedrock` runs Terraform destroy, then **`cleanup-agentcore-memory.sh`** when `AGENT_BACKEND=agentcore`. AgentCore harness delete does not always remove the managed **Memory** resource; a failed harness create can also leave a memory named `demo_support_agent` (hyphens in `AGENT_NAME` become underscores). Without cleanup, the next apply fails with `Memory with name … already exists`.
+`apply-bedrock` and `destroy-bedrock` both run **`cleanup-agentcore-memory.sh`** when `AGENT_BACKEND=agentcore`. Failed harness creates leave a Memory named `demo_support_agent` in AWS; the next apply hits `Memory with name … already exists` until that memory is deleted.
 
 Orphan cleanup only:
 

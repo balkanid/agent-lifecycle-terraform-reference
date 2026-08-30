@@ -61,6 +61,12 @@ case "$cmd" in
     echo "==> BalkanID gate (gate.py)" >&2
     python3 "$root/scripts/gate.py"
 
+    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$backend_lc" == "agentcore" ]]; then
+      echo "==> AgentCore memory cleanup (before apply — clears orphans from prior failed creates)" >&2
+      "$root/scripts/cleanup-agentcore-memory.sh"
+    fi
+
     echo "==> Terraform Bedrock stack (backend=${AGENT_BACKEND:-agentcore})" >&2
     cd "$root/terraform/bedrock"
     terraform init -input=false

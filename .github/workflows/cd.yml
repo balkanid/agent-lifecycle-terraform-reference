@@ -119,6 +119,15 @@ jobs:
         working-directory: terraform/bedrock
         run: terraform init -input=false
 
+      - name: AgentCore memory cleanup (before apply)
+        if: github.event.inputs.operation == 'apply' && env.ENABLE_BEDROCK == 'true' && env.AGENT_BACKEND == 'agentcore'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AGENT_NAME: ${{ env.AGENT_NAME }}
+        run: bash scripts/cleanup-agentcore-memory.sh
+
       - name: Terraform apply (Bedrock)
         if: github.event.inputs.operation == 'apply' && env.ENABLE_BEDROCK == 'true'
         working-directory: terraform/bedrock
