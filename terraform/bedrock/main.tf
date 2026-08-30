@@ -73,6 +73,14 @@ resource "aws_iam_role" "agentcore" {
           Service = "bedrock-agentcore.amazonaws.com"
         }
         Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = var.aws_account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = "arn:aws:bedrock-agentcore:${var.aws_region}:${var.aws_account_id}:*"
+          }
+        }
       }
     ]
   })

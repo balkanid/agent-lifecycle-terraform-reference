@@ -149,6 +149,8 @@ With Bedrock (after AWS is configured):
 ./scripts/terraform-local.sh apply-bedrock
 ```
 
+The AgentCore execution role trust policy must include `aws:SourceAccount` and `aws:SourceArn` conditions (see `terraform/bedrock/main.tf`). Without them, harness create fails with `BedrockAgentcoreRuntimeControl` role validation errors.
+
 Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your account is allowlisted for Bedrock Agents Classic.
 
 `apply-bedrock` runs gate → Terraform → **`syncIntegration`** when `TRIGGER_INTEGRATION_SYNC=true` (default) and `INTEGRATION_ID` is set.
