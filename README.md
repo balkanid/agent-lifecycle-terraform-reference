@@ -39,17 +39,17 @@ Outbound webhooks (`request.actioned`) can notify customer automation when appro
 
 ### CD (manual — demo pipeline waits on BalkanID)
 
-[`.github/workflows/cd.yml`](.github/workflows/cd.yml) runs **`gate.py` in GitHub Actions**, then optionally `terraform apply` and **`syncIntegration`** when Bedrock is enabled:
+[`.github/workflows/cd.yml`](.github/workflows/cd.yml) runs **`gate.py` in GitHub Actions**, then optionally `terraform apply` and **`syncIntegration`** when AWS provisioning is enabled:
 
 ```
 GitHub Actions: gate.py → createRequest (AGENT_ACCESS)
     → [job waiting — approve/deny in BalkanID UI]
-    → approved → (ENABLE_BEDROCK=true) terraform apply → Bedrock/AgentCore resources
+    → approved → (PROVISION_AWS_AGENT=true) terraform apply → AgentCore harness or Classic agent
     → (TRIGGER_INTEGRATION_SYNC=true) syncIntegration → AWS extractor sync
     → denied → job fails, nothing in AWS
 ```
 
-Gate-only (`ENABLE_BEDROCK=false`): the workflow stops after gate approval — no Terraform/AWS step.
+Gate-only (`PROVISION_AWS_AGENT=false`): the workflow stops after gate approval — no Terraform/AWS step.
 
 **Setup:** create GitHub environment `agent-lifecycle` and configure **variables + secrets** per [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md).
 
@@ -57,9 +57,9 @@ Gate-only (`ENABLE_BEDROCK=false`): the workflow stops after gate approval — n
 
 | Source | Examples |
 |---|---|
-| **Environment variables** | `ENABLE_BEDROCK`, `AGENT_BACKEND`, `TRIGGER_INTEGRATION_SYNC`, `BALKANID_PUBLIC_API_URL`, `BALKANID_INTEGRATION_ID`, `APPROVAL_WAIT_MINUTES`, `AGENT_NAME` |
-| **Environment secrets** | `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, `AWS_*` (when Bedrock enabled) |
-| **Per-run workflow inputs** | `operation`, optional overrides for `agent_name`, `agent_backend` (`agentcore` \| `classic`), `approval_wait_minutes` |
+| **Environment variables** | `PROVISION_AWS_AGENT`, `AGENT_BACKEND`, `TRIGGER_INTEGRATION_SYNC`, `BALKANID_PUBLIC_API_URL`, `BALKANID_INTEGRATION_ID`, `APPROVAL_WAIT_MINUTES`, `AGENT_NAME` |
+| **Environment secrets** | `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, `AWS_*` (when `PROVISION_AWS_AGENT=true`) |
+| **Per-run workflow inputs** | `operation`, optional overrides for `agent_name`, `agent_backend` (`agentcore` \| `classic`), `provision_aws_agent`, `approval_wait_minutes` |
 
 While the job is running, open Access Requests in BalkanID and approve or deny.
 
@@ -99,7 +99,7 @@ agent-lifecycle-terraform-pov/
 
 **AWS (optional)**
 
-- Only required when `ENABLE_BEDROCK=true` (CD) or `./scripts/terraform-local.sh apply-bedrock` (local).
+- Only required when `PROVISION_AWS_AGENT=true` (CD) or `./scripts/terraform-local.sh apply-bedrock` (local).
 - Bedrock enabled in **us-east-1** (or another [AgentCore-supported region](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html)).
 - Foundation model access (default: Amazon Nova Micro).
 - IAM permissions per `aws/bedrock-agent-lifecycle-iam-policy.json`.
@@ -133,7 +133,7 @@ Gate-only (no AWS credentials required):
 cd terraform
 terraform init
 terraform apply \
-  -var="enable_bedrock=false" \
+  -var="run_balkanid_gate=true" \
   -var="api_key_id=$API_KEY_ID" \
   -var="api_key_secret=$API_KEY_SECRET" \
   -var="agent_owner_email=$BALKANID_AGENT_OWNER_EMAIL" \
@@ -178,7 +178,7 @@ Alternatively, use a fresh `AGENT_NAME` each run (e.g. `demo-support-agent-2`).
 
 | Variable | Description |
 |---|---|
-| `enable_bedrock` | When `false`, only runs the BalkanID gate. Default `false`. |
+| `run_balkanid_gate` | When `true`, runs the BalkanID gate via Terraform local-exec. CD runs `gate.py` in the workflow instead. |
 | `balkanid_public_api_url` | Public API base URL for your tenant. |
 | `api_key_id`, `api_key_secret` | Employee API key (sensitive). |
 | `agent_owner_email` | Employee who will own the agent (`BALKANID_AGENT_OWNER_EMAIL` in `.env` / CD). |
