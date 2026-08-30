@@ -44,20 +44,18 @@ Employee email and integration id are identifiers, not credentials — variables
 
 ## Per-run workflow overrides
 
-When you **Run workflow**, you can override:
+When you **Run workflow**, dropdowns default to **`use-env`** (read from environment variables). Only `agent_name` is free text (blank = env var).
 
-| Workflow input | Overrides variable |
-|---|---|
-| `agent_name` | `AGENT_NAME` |
-| `agent_backend` | `AGENT_BACKEND` (`agentcore` or `classic`) |
-| `provision_aws_agent` | `PROVISION_AWS_AGENT` (`true` or `false`) |
-| `approval_wait_minutes` | `APPROVAL_WAIT_MINUTES` |
+| Workflow input | Type | Overrides variable |
+|---|---|---|
+| `operation` | dropdown | — (always per run) |
+| `provision_aws_agent` | dropdown (`use-env` / `true` / `false`) | `PROVISION_AWS_AGENT` |
+| `agent_backend` | dropdown (`use-env` / `agentcore` / `classic`) | `AGENT_BACKEND` |
+| `trigger_integration_sync` | dropdown (`use-env` / `true` / `false`) | `TRIGGER_INTEGRATION_SYNC` |
+| `approval_wait_minutes` | dropdown (`use-env` / 30 / 60 / 120 / 240 / 360) | `APPROVAL_WAIT_MINUTES` |
+| `agent_name` | text (optional) | `AGENT_NAME` |
 
-`operation` (`apply` / `destroy`) is always chosen per run.  
-Blank workflow inputs fall back to environment variables.  
-`TRIGGER_INTEGRATION_SYNC` and other settings come from environment variables only.
-
-**AgentCore harness:** set `provision_aws_agent=true` (dispatch input or env var) and `agent_backend=agentcore` (default). There is no separate AgentCore flag — `PROVISION_AWS_AGENT` is the master switch for all AWS provisioning.
+**AgentCore harness:** set `provision_aws_agent` to `true` and `agent_backend` to `agentcore` (or `use-env` when env defaults apply).
 
 ## End-to-end apply flow (`PROVISION_AWS_AGENT=true`)
 

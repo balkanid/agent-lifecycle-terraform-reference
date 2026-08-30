@@ -59,7 +59,7 @@ Gate-only (`PROVISION_AWS_AGENT=false`): the workflow stops after gate approval 
 |---|---|
 | **Environment variables** | `PROVISION_AWS_AGENT`, `AGENT_BACKEND`, `TRIGGER_INTEGRATION_SYNC`, `BALKANID_PUBLIC_API_URL`, `BALKANID_INTEGRATION_ID`, `APPROVAL_WAIT_MINUTES`, `AGENT_NAME` |
 | **Environment secrets** | `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, `AWS_*` (when `PROVISION_AWS_AGENT=true`) |
-| **Per-run workflow inputs** | `operation`, optional overrides for `agent_name`, `agent_backend` (`agentcore` \| `classic`), `provision_aws_agent`, `approval_wait_minutes` |
+| **Per-run workflow inputs** | `operation`, `provision_aws_agent`, `agent_backend`, `trigger_integration_sync`, `approval_wait_minutes` (dropdowns; default `use-env`), optional `agent_name` (text) |
 
 While the job is running, open Access Requests in BalkanID and approve or deny.
 
