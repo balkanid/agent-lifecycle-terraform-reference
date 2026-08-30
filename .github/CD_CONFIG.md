@@ -28,7 +28,8 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 | `AGENT_NAME` | No | `demo-support-agent` | Agent / Terraform resource name |
 | `AGENT_PURPOSE` | No | `Agent lifecycle CD pipeline demo` | Purpose string passed as `createRequest.reason` |
 | `AWS_REGION` | No | `us-east-1` | AWS region when `ENABLE_BEDROCK=true` |
-| `AWS_ACCOUNT_ID` | When `ENABLE_BEDROCK=true` | — | 12-digit account id (`aws sts get-caller-identity --query Account --output text`) |
+
+Account id for Terraform IAM trust policies is resolved at runtime via `aws sts get-caller-identity` (no GitHub variable needed). Local runs can still set `AWS_ACCOUNT_ID` in `.env` — see `scripts/terraform-local.sh`.
 
 ### Why secret vs variable?
 

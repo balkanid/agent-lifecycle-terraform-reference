@@ -30,14 +30,10 @@ on:
         default: ""
         type: string
       agent_backend:
-        description: AWS agent backend (leave blank to use AGENT_BACKEND environment variable)
+        description: AWS agent backend — agentcore, classic, or blank for AGENT_BACKEND env var
         required: false
         default: ""
-        type: choice
-        options:
-          - ""
-          - agentcore
-          - classic
+        type: string
 
 concurrency:
   group: agent-lifecycle-cd-${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.AGENT_NAME || 'demo-support-agent' }}
@@ -114,6 +110,17 @@ jobs:
           umask 077
           printf '%s\n' '[pov]' "aws_access_key_id = ${AWS_ACCESS_KEY_ID}" "aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}" > /tmp/pov-aws-credentials
 
+      - name: Resolve AWS account id
+        if: env.ENABLE_BEDROCK == 'true'
+        id: aws_account
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          echo "account_id=${account_id}" >> "$GITHUB_OUTPUT"
+
       - name: Terraform init
         if: env.ENABLE_BEDROCK == 'true'
         working-directory: terraform/bedrock
@@ -133,12 +140,12 @@ jobs:
         working-directory: terraform/bedrock
         env:
           TF_VAR_aws_credentials_file: /tmp/pov-aws-credentials
-          TF_VAR_aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          TF_VAR_aws_account_id: ${{ steps.aws_account.outputs.account_id }}
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
         run: |
-          echo "::notice::Applying AWS agent backend=${AGENT_BACKEND}"
+          echo "::notice::Applying AWS agent backend=${AGENT_BACKEND} account=${TF_VAR_aws_account_id}"
           terraform apply -auto-approve -input=false
 
       - name: Trigger integration sync
@@ -165,7 +172,7 @@ jobs:
         working-directory: terraform/bedrock
         env:
           TF_VAR_aws_credentials_file: /tmp/pov-aws-credentials
-          TF_VAR_aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          TF_VAR_aws_account_id: ${{ steps.aws_account.outputs.account_id }}
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
