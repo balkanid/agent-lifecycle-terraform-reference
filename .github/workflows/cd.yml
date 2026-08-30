@@ -3,6 +3,7 @@ name: CD
 # Runs the BalkanID gate, then optionally terraform apply for AWS agent resources, then retrigger integration sync.
 # Flow (apply): gate.py → poll approval → terraform apply → syncIntegration (when enabled).
 # Gate-only (ENABLE_BEDROCK=false): gate.py only — no AWS/Terraform/sync.
+# ENABLE_BEDROCK=true is required for AgentCore harness and Classic agent provisioning (same Terraform stack).
 #
 # Configure the agent-lifecycle GitHub environment:
 #   Variables — non-sensitive defaults (see .github/CD_CONFIG.md)
@@ -34,6 +35,11 @@ on:
         required: false
         default: ""
         type: string
+      enable_bedrock:
+        description: Provision AWS agent after gate — true/false, or blank for ENABLE_BEDROCK env var
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: agent-lifecycle-cd-${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.AGENT_NAME || 'demo-support-agent' }}
@@ -50,7 +56,7 @@ jobs:
     timeout-minutes: 360
     environment: agent-lifecycle
     env:
-      ENABLE_BEDROCK: ${{ vars.ENABLE_BEDROCK || 'false' }}
+      ENABLE_BEDROCK: ${{ github.event.inputs.enable_bedrock != '' && github.event.inputs.enable_bedrock || vars.ENABLE_BEDROCK || 'false' }}
       APPROVAL_WAIT_MINUTES: ${{ github.event.inputs.approval_wait_minutes != '' && github.event.inputs.approval_wait_minutes || vars.APPROVAL_WAIT_MINUTES || '120' }}
       AGENT_NAME: ${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.AGENT_NAME || 'demo-support-agent' }}
       AGENT_BACKEND: ${{ github.event.inputs.agent_backend != '' && github.event.inputs.agent_backend || vars.AGENT_BACKEND || 'agentcore' }}

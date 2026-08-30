@@ -18,8 +18,8 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 
 | Name | Required | Default | Description |
 |---|---|---|---|
-| `ENABLE_BEDROCK` | No | `false` | `true` = create IAM role + AWS agent after gate approval; `false` = gate-only |
-| `AGENT_BACKEND` | No | `agentcore` | `agentcore` (AgentCore harness, new accounts) or `classic` (Bedrock Agents Classic, allowlisted accounts) |
+| `ENABLE_BEDROCK` | No | `false` | **`true` required to provision any AWS agent** (AgentCore harness *or* Classic agent): IAM role + Terraform apply + optional sync after gate approval. `false` = gate-only demo. |
+| `AGENT_BACKEND` | No | `agentcore` | When `ENABLE_BEDROCK=true`: `agentcore` (AgentCore harness, new accounts) or `classic` (Bedrock Agents Classic, allowlisted accounts). Ignored when gate-only. |
 | `TRIGGER_INTEGRATION_SYNC` | No | `true` | After successful Terraform apply, call Public API `syncIntegration` for `BALKANID_INTEGRATION_ID` |
 | `BALKANID_PUBLIC_API_URL` | Yes | — | Public API base URL, e.g. `https://balkanid.dev/api/public` |
 | `BALKANID_AGENT_OWNER_EMAIL` | Yes | — | Employee who will own the agent (`createRequest.employeeEmail`) |
@@ -50,10 +50,14 @@ When you **Run workflow**, you can override:
 |---|---|
 | `agent_name` | `AGENT_NAME` |
 | `agent_backend` | `AGENT_BACKEND` (`agentcore` or `classic`) |
+| `enable_bedrock` | `ENABLE_BEDROCK` (`true` or `false`) |
 | `approval_wait_minutes` | `APPROVAL_WAIT_MINUTES` |
 
 `operation` (`apply` / `destroy`) is always chosen per run.  
-`ENABLE_BEDROCK`, `TRIGGER_INTEGRATION_SYNC`, and other settings come from environment variables unless overridden above.
+Blank workflow inputs fall back to environment variables.  
+`TRIGGER_INTEGRATION_SYNC` and other settings come from environment variables only.
+
+**AgentCore harness:** set `enable_bedrock=true` (dispatch input or env var) and `agent_backend=agentcore` (default). There is no separate AgentCore flag — `ENABLE_BEDROCK` is the master switch for all AWS provisioning.
 
 ## End-to-end apply flow (`ENABLE_BEDROCK=true`)
 
