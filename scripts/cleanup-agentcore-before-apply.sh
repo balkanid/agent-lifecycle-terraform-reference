@@ -58,8 +58,8 @@ state_has() {
 iam_role_policy_resource() {
   local role_resource="$1"
   case "$role_resource" in
-    aws_iam_role.agentcore[0]) echo "aws_iam_role_policy.agentcore_invoke[0]" ;;
-    aws_iam_role.bedrock_classic[0]) echo "aws_iam_role_policy.bedrock_classic_invoke[0]" ;;
+    'aws_iam_role.agentcore[0]') echo 'aws_iam_role_policy.agentcore_invoke[0]' ;;
+    'aws_iam_role.bedrock_classic[0]') echo 'aws_iam_role_policy.bedrock_classic_invoke[0]' ;;
     *) echo "" ;;
   esac
 }
@@ -197,6 +197,16 @@ reset_iam_for_fresh_apply() {
   local role_resource="$1"
   echo "Harness not in Terraform state — resetting IAM role for a clean apply (typical after destroy or partial teardown)."
   remove_iam_from_terraform_state "$role_resource"
+  # Belt-and-suspenders: remove any IAM role/policy still in state (e.g. if case patterns missed [0] resources).
+  while IFS= read -r resource; do
+    [[ -z "$resource" ]] && continue
+    case "$resource" in
+      aws_iam_role.*|aws_iam_role_policy.*)
+        echo "  -> terraform state rm ${resource}"
+        (cd "$tf_dir" && terraform state rm "$resource")
+        ;;
+    esac
+  done <<< "$(terraform_state_list)"
   if aws_cli iam list-role-policies --role-name "$role_name" --no-cli-pager >/dev/null 2>&1; then
     echo "Deleting IAM role ${role_name} from AWS so apply can recreate it."
     delete_iam_role_in_aws
