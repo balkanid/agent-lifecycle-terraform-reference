@@ -93,3 +93,5 @@ If the job fails with **HTTP 403** and a Cloudflare “Sorry, you have been bloc
 3. Run CD from a **self-hosted runner** with a stable, allowlisted egress IP.
 
 Gate-only runs (`PROVISION_AWS_AGENT=false`) still need Public API access from the runner — Terraform is not involved until AWS provisioning is enabled.
+
+**Infra fix (preferred):** `deployment/modules/edge/cloudflare` skips managed WAF and dev IP allowlist for `/api/public` when `X-Api-Key-Id` and `X-Api-Key-Secret` are present. Apply the balkanid **dev** and **prod** cell stacks after that module change merges (covers `balkanid.dev` and `balkanid.app` zones).
