@@ -28,7 +28,7 @@ Or paste the JSON into the user's inline policy in the IAM console.
 |---|---|
 | `BedrockAgentsClassic` | `aws_bedrockagent_agent` apply/destroy/refresh (`AGENT_BACKEND=classic`) |
 | `BedrockAgentCoreHarnessLifecycle` | `aws_bedrockagentcore_harness` + runtime/memory/endpoints/workload identity create/destroy; `cleanup-agentcore-before-apply.sh` harness delete |
-| `IamRolesUnderLifecyclePath` | `aws_iam_role` + `aws_iam_role_policy` under `/balkanid-agent-lifecycle/` — create, **GetRole refresh**, update trust/inline policy, delete |
+| `IamRolesUnderLifecyclePath` | `aws_iam_role` + `aws_iam_role_policy` under `/balkanid-agent-lifecycle/` — scoped with **`iam:ResourcePath`** (required for `GetRole` on path-prefixed roles; `role/balkanid-agent-lifecycle/*` alone is not enough in all API checks) |
 | `IamInstanceProfilesForRoleDelete` | `DeleteRole` pre-check: detach role from instance profiles if present |
 | `PassExecutionRolesToBedrock` | Pass execution role to `bedrock.amazonaws.com` / `bedrock-agentcore.amazonaws.com` on harness/agent create |
 | `CallerIdentity` | CD resolves account id |

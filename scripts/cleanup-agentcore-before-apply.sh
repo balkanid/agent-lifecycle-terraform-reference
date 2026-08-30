@@ -54,27 +54,31 @@ state_has() {
   terraform_state_list | grep -Fxq "$resource"
 }
 
-delete_iam_role_if_orphan() {
+iam_role_policy_resource() {
   local role_resource="$1"
+  case "$role_resource" in
+    aws_iam_role.agentcore[0]) echo "aws_iam_role_policy.agentcore_invoke[0]" ;;
+    aws_iam_role.bedrock_classic[0]) echo "aws_iam_role_policy.bedrock_classic_invoke[0]" ;;
+    *) echo "" ;;
+  esac
+}
+
+remove_iam_from_terraform_state() {
+  local role_resource="$1"
+  local policy_resource
+  policy_resource="$(iam_role_policy_resource "$role_resource")"
+  if [[ -n "$policy_resource" ]] && state_has "$policy_resource"; then
+    echo "  -> terraform state rm ${policy_resource}"
+    (cd "$tf_dir" && terraform state rm "$policy_resource")
+  fi
   if state_has "$role_resource"; then
-    echo "IAM role ${role_name} is in Terraform state — leaving in place."
-    return 0
+    echo "  -> terraform state rm ${role_resource}"
+    (cd "$tf_dir" && terraform state rm "$role_resource")
   fi
+}
 
-  if ! aws_cli iam get-role --role-name "$role_name" --no-cli-pager >/dev/null 2>&1; then
-    echo "No orphan IAM role named ${role_name}."
-    return 0
-  fi
-
-  local actual_path
-  actual_path="$(aws_cli iam get-role --role-name "$role_name" --query 'Role.Path' --output text --no-cli-pager)"
-  if [[ "$actual_path" != "$role_path" ]]; then
-    echo "IAM role ${role_name} exists at path ${actual_path} (expected ${role_path}) — not deleting."
-    return 0
-  fi
-
-  echo "Deleting orphan IAM role ${role_name} (not in Terraform state)."
-  local policy_names
+delete_iam_role_in_aws() {
+  local policy_names attached_arns
   policy_names="$(aws_cli iam list-role-policies --role-name "$role_name" --query 'PolicyNames[]' --output text --no-cli-pager 2>/dev/null || true)"
   for policy_name in $policy_names; do
     [[ -z "$policy_name" || "$policy_name" == "None" ]] && continue
@@ -82,7 +86,6 @@ delete_iam_role_if_orphan() {
     aws_cli iam delete-role-policy --role-name "$role_name" --policy-name "$policy_name" --no-cli-pager
   done
 
-  local attached_arns
   attached_arns="$(aws_cli iam list-attached-role-policies --role-name "$role_name" --query 'AttachedPolicies[].PolicyArn' --output text --no-cli-pager 2>/dev/null || true)"
   for policy_arn in $attached_arns; do
     [[ -z "$policy_arn" || "$policy_arn" == "None" ]] && continue
@@ -91,7 +94,46 @@ delete_iam_role_if_orphan() {
   done
 
   aws_cli iam delete-role --role-name "$role_name" --no-cli-pager
-  echo "Orphan IAM role ${role_name} deleted."
+}
+
+reconcile_iam_role() {
+  local role_resource="$1"
+  local get_err="" get_rc=0 actual_path=""
+
+  if aws_cli iam get-role --role-name "$role_name" --no-cli-pager >/dev/null 2>&1; then
+    actual_path="$(aws_cli iam get-role --role-name "$role_name" --query 'Role.Path' --output text --no-cli-pager)"
+    if [[ "$actual_path" != "$role_path" ]]; then
+      echo "IAM role ${role_name} exists at path ${actual_path} (expected ${role_path})."
+      if state_has "$role_resource"; then
+        echo "Removing mismatched role from Terraform state so apply can recreate under ${role_path}."
+        remove_iam_from_terraform_state "$role_resource"
+      fi
+      return 0
+    fi
+    if state_has "$role_resource"; then
+      echo "IAM role ${role_name} exists in AWS and Terraform state — OK."
+    else
+      echo "Deleting orphan IAM role ${role_name} (exists in AWS, not in Terraform state)."
+      delete_iam_role_in_aws
+      echo "Orphan IAM role ${role_name} deleted."
+    fi
+    return 0
+  fi
+
+  get_err="$(aws_cli iam get-role --role-name "$role_name" --no-cli-pager 2>&1)" || get_rc=$?
+  if echo "$get_err" | grep -q 'NoSuchEntity'; then
+    if state_has "$role_resource"; then
+      echo "IAM role ${role_name} is in Terraform state but absent in AWS — removing from state."
+      remove_iam_from_terraform_state "$role_resource"
+    else
+      echo "No IAM role named ${role_name}."
+    fi
+    return 0
+  fi
+
+  echo "error: cannot read IAM role ${role_name} (exit ${get_rc}): ${get_err}" >&2
+  echo "error: ensure bedrock-lifecycle.user has the full aws/bedrock-agent-lifecycle-iam-policy.json attached in AWS (replace entire policy)." >&2
+  return 1
 }
 
 delete_harness_if_orphan_or_failed() {
@@ -137,6 +179,11 @@ for h in json.load(sys.stdin).get('harnesses') or []:
       echo "warning: delete-harness ${harness_id} failed — continuing" >&2
     fi
   done <<< "$matches"
+
+  if [[ "$in_state" == true && -z "$matches" ]]; then
+    echo "Harness ${harness_name} is in Terraform state but absent in AWS — removing from state."
+    (cd "$tf_dir" && terraform state rm "$harness_resource" 2>/dev/null || true)
+  fi
 }
 
 echo "==> AgentCore pre-apply reconciliation (agent=${agent_name}, region=${region})"
@@ -145,9 +192,9 @@ delete_harness_if_orphan_or_failed
 
 backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
 if [[ "$backend_lc" == "agentcore" ]]; then
-  delete_iam_role_if_orphan "aws_iam_role.agentcore[0]"
+  reconcile_iam_role "aws_iam_role.agentcore[0]"
 else
-  delete_iam_role_if_orphan "aws_iam_role.bedrock_classic[0]"
+  reconcile_iam_role "aws_iam_role.bedrock_classic[0]"
 fi
 
 echo "==> AgentCore memory cleanup"
