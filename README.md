@@ -20,7 +20,7 @@ Terraform apply
     → createRequest AGENT_ACCESS (BalkanID Public API, requestType: agent_access_request)
     → policy evaluation
     → [pending] human approval in BalkanID UI
-    → approved → apply continues → AWS Bedrock agent (optional)
+    → approved → apply continues → AWS agent (Bedrock Classic or AgentCore harness, optional)
     → AWS extractor sync discovers agent in BalkanID; map IAM identity to owner
 ```
 
@@ -97,10 +97,11 @@ agent-lifecycle-terraform-pov/
 
 **AWS (optional)**
 
-- Only required when `enable_bedrock=true`.
-- Bedrock enabled in **us-east-1** (Bedrock Agents are not available in all regions).
+- Only required when `ENABLE_BEDROCK=true` (CD) or `./scripts/terraform-local.sh apply-bedrock` (local).
+- Bedrock enabled in **us-east-1** (or another [AgentCore-supported region](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html)).
 - Foundation model access (default: Amazon Nova Micro).
 - IAM permissions per `aws/bedrock-agent-lifecycle-iam-policy.json`.
+- **New AWS accounts** (no prior Bedrock Agents Classic usage) must use **`AGENT_BACKEND=agentcore`** — Classic agent creation is blocked in [maintenance mode](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html). Allowlisted accounts can set `AGENT_BACKEND=classic`.
 
 ## Quick start — gate only (no AWS)
 
@@ -142,16 +143,13 @@ terraform apply \
 With Bedrock (after AWS is configured):
 
 ```bash
-export AWS_PROFILE=your-profile   # us-east-1
-terraform apply \
-  -var="enable_bedrock=true" \
-  -var="api_key_id=$API_KEY_ID" \
-  -var="api_key_secret=$API_KEY_SECRET" \
-  -var="agent_owner_email=$BALKANID_AGENT_OWNER_EMAIL" \
-  -var="integration_id=$INTEGRATION_ID"
+# Recommended: gate + Bedrock in one step (sources .env, writes isolated cred file)
+./scripts/terraform-local.sh apply-bedrock
 ```
 
-After a successful apply with Bedrock enabled, run an AWS integration sync — the agent is discovered via the extractor (no manual agent registration API call).
+Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your account is allowlisted for Bedrock Agents Classic.
+
+After a successful apply, run an AWS integration sync — agents are discovered via the AWS extractor (`ListAgents` for Classic, `ListHarnesses` for AgentCore).
 
 ### Variables
 
@@ -162,15 +160,16 @@ After a successful apply with Bedrock enabled, run an AWS integration sync — t
 | `api_key_id`, `api_key_secret` | Employee API key (sensitive). |
 | `agent_owner_email` | Employee who will own the agent (`BALKANID_AGENT_OWNER_EMAIL` in `.env` / CD). |
 | `integration_id` | Optional integration id on the agent access request. |
-| `agent_name` | Agent name in the access request and Bedrock resource. |
+| `agent_name` | Agent name in the access request and AWS resource. |
+| `agent_backend` | `agentcore` (default) or `classic` — see [Bedrock Agents Classic maintenance mode](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html). |
 | `agent_purpose`, `intended_iam_role_arn` | Optional metadata on the agent access request. |
-| `foundation_model` | Bedrock model id when `enable_bedrock=true`. |
+| `foundation_model` | Bedrock model id for Classic agent or AgentCore harness. |
 
 Pass secrets via `-var`, `TF_VAR_*`, or a gitignored `terraform.tfvars` file.
 
 ## AWS IAM policy
 
-Attach `aws/bedrock-agent-lifecycle-iam-policy.json` to the role or user running Terraform. It scopes IAM role creation to path `/balkanid-agent-lifecycle/` and allows Bedrock agent management APIs. Adjust the account id in `INTENDED_IAM_ROLE_ARN` / tfvars for your environment.
+Attach `aws/bedrock-agent-lifecycle-iam-policy.json` to the role or user running Terraform. It scopes IAM role creation to path `/balkanid-agent-lifecycle/` and allows both Bedrock Agents Classic and AgentCore harness APIs. Adjust the account id in `INTENDED_IAM_ROLE_ARN` / tfvars for your environment.
 
 ## How this uses BalkanID APIs today
 
@@ -188,14 +187,14 @@ The gate sends structured agent intent (`ownerEmail`, `action: CREATE`, `name`, 
 2. **Gate:** `terraform apply` waits on BalkanID; show the pending access request.
 3. **Policy:** show approval rules; optional second apply that auto-denies.
 4. **Webhook or poll:** show `request.actioned` (or script exiting on approve).
-5. **Payload:** Bedrock agent appears only after approval (if enabled).
+5. **Payload:** AWS agent (Classic or AgentCore harness) appears only after approval (if enabled).
 6. **SoR:** AWS extractor sync shows agent in BalkanID with owner and mapped IAM identity.
 7. **Positioning:** BalkanID governs lifecycle; runtime gateways remain separate.
 
 ## Out of scope
 
 - Runtime / invoke-time gateway
-- Bedrock or Kubernetes extractors (discovery of agents created outside BalkanID)
+- Kubernetes agent extractors
 - Inbound webhook gateway (EN-8766) — Terraform calls Public API directly
 - Production hardening (idempotency, ASSIGN/UNASSIGN/DELETE agent access actions, synchronous policy API)
 

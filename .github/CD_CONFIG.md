@@ -18,7 +18,8 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 
 | Name | Required | Default | Description |
 |---|---|---|---|
-| `ENABLE_BEDROCK` | No | `false` | `true` = create IAM role + Bedrock agent after gate approval; `false` = gate-only |
+| `ENABLE_BEDROCK` | No | `false` | `true` = create IAM role + AWS agent after gate approval; `false` = gate-only |
+| `AGENT_BACKEND` | No | `agentcore` | `agentcore` (AgentCore harness, new accounts) or `classic` (Bedrock Agents Classic, allowlisted accounts) |
 | `BALKANID_PUBLIC_API_URL` | Yes | — | Public API base URL, e.g. `https://your-tenant.balkanid.app/api/public` |
 | `BALKANID_AGENT_OWNER_EMAIL` | Yes | — | Employee who will own the agent (`createRequest.employeeEmail`) |
 | `BALKANID_INTEGRATION_ID` | No | *(empty)* | Optional integration id on the agent access request |
@@ -26,6 +27,7 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 | `AGENT_NAME` | No | `demo-support-agent` | Agent / Terraform resource name |
 | `AGENT_PURPOSE` | No | `Agent lifecycle CD pipeline demo` | Purpose string passed as `createRequest.reason` |
 | `AWS_REGION` | No | `us-east-1` | AWS region when `ENABLE_BEDROCK=true` |
+| `AWS_ACCOUNT_ID` | When `ENABLE_BEDROCK=true` | — | 12-digit account id (`aws sts get-caller-identity --query Account --output text`) |
 
 ### Why secret vs variable?
 
@@ -59,7 +61,7 @@ When you **Run workflow**, you can override:
 5. To test Bedrock: set `ENABLE_BEDROCK=true`, add AWS secrets, run `apply` again.
 6. Run `destroy` to tear down AWS resources (uses cached Terraform state).
 
-Bedrock Agents and model access must be enabled in **us-east-1** when `ENABLE_BEDROCK=true`.
+Bedrock and AgentCore must be enabled in your chosen region when `ENABLE_BEDROCK=true`. Default **`AGENT_BACKEND=agentcore`** works on new AWS accounts; use `classic` only if your account has prior Bedrock Agents Classic usage ([maintenance mode FAQ](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html)).
 
 State is cached per `AGENT_NAME` + branch when `ENABLE_BEDROCK=true` (PoV-grade; use an S3 backend for production).
 

@@ -2,7 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "BedrockAgentLifecycle",
+      "Sid": "BedrockAgentsClassic",
       "Effect": "Allow",
       "Action": [
         "bedrock:CreateAgent",
@@ -17,6 +17,24 @@
         "bedrock:DeleteAgentAlias",
         "bedrock:TagResource",
         "bedrock:ListFoundationModels"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BedrockAgentCoreHarness",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:CreateHarness",
+        "bedrock-agentcore:GetHarness",
+        "bedrock-agentcore:ListHarnesses",
+        "bedrock-agentcore:UpdateHarness",
+        "bedrock-agentcore:DeleteHarness",
+        "bedrock-agentcore:CreateAgentRuntime",
+        "bedrock-agentcore:UpdateAgentRuntime",
+        "bedrock-agentcore:DeleteAgentRuntime",
+        "bedrock-agentcore:CreateMemory",
+        "bedrock-agentcore:UpdateMemory",
+        "bedrock-agentcore:DeleteMemory"
       ],
       "Resource": "*"
     },

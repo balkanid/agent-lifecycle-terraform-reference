@@ -1,34 +1,12 @@
-variable "enable_bedrock" {
-  type        = bool
-  default     = false
-  description = "When false, only the BalkanID gate runs. Set true to also create a Bedrock agent."
-}
-
 variable "run_balkanid_gate" {
   type        = bool
   default     = true
   description = "When false, skip gate local-exec (CD runs gate.py in the workflow first)."
 }
 
-variable "aws_region" {
-  type    = string
-  default = "us-east-1"
-}
-
 variable "agent_name" {
   type    = string
   default = "demo-support-agent"
-}
-
-variable "foundation_model" {
-  type        = string
-  default     = "amazon.nova-micro-v1:0"
-  description = "Must be enabled in Bedrock model access for this account/region."
-}
-
-variable "agent_instruction" {
-  type    = string
-  default = "You are a demo assistant. Do not perform real actions against production systems."
 }
 
 variable "balkanid_public_api_url" {

@@ -37,9 +37,6 @@ jobs:
   terraform:
     name: Terraform
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: terraform
     steps:
       - uses: actions/checkout@v4
 
@@ -48,20 +45,24 @@ jobs:
           terraform_version: 1.12.2
 
       - name: Format check
-        run: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive terraform
 
-      - name: Init
-        run: terraform init -backend=false
+      - name: Validate gate stack
+        working-directory: terraform
+        run: |
+          terraform init -backend=false
+          TF_VAR_api_key_id=ci-dummy \
+          TF_VAR_api_key_secret=ci-dummy \
+          TF_VAR_agent_owner_email=ci@example.com \
+          terraform validate
 
-      - name: Validate
-        env:
-          TF_VAR_enable_bedrock: "false"
-          TF_VAR_run_balkanid_gate: "true"
-          TF_VAR_api_key_id: ci-dummy
-          TF_VAR_api_key_secret: ci-dummy
-          TF_VAR_agent_owner_email: ci@example.com
-          TF_VAR_integration_id: ci-integration
-        run: terraform validate
+      - name: Validate Bedrock stack
+        working-directory: terraform/bedrock
+        run: |
+          terraform init -backend=false
+          TF_VAR_aws_credentials_file=/dev/null \
+          TF_VAR_aws_account_id=123456789012 \
+          terraform validate
 
   iam-policy:
     name: IAM policy JSON
