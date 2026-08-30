@@ -83,12 +83,7 @@
         "iam:ListAttachedRolePolicies",
         "iam:ListInstanceProfilesForRole"
       ],
-      "Resource": "arn:aws:iam::*:role/*",
-      "Condition": {
-        "StringEquals": {
-          "iam:ResourcePath": "/balkanid-agent-lifecycle/"
-        }
-      }
+      "Resource": "arn:aws:iam::*:role/balkanid-agent-lifecycle/*"
     },
     {
       "Sid": "IamInstanceProfilesForRoleDelete",
@@ -100,11 +95,8 @@
       "Sid": "PassExecutionRolesToBedrock",
       "Effect": "Allow",
       "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::*:role/*",
+      "Resource": "arn:aws:iam::*:role/balkanid-agent-lifecycle/*",
       "Condition": {
-        "StringEquals": {
-          "iam:ResourcePath": "/balkanid-agent-lifecycle/"
-        },
         "ForAnyValue:StringEquals": {
           "iam:PassedToService": [
             "bedrock.amazonaws.com",
