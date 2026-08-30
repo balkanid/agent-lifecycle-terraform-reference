@@ -4,10 +4,12 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-set -a
-# shellcheck source=/dev/null
-source "$root/.env"
-set +a
+if [[ -f "$root/.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$root/.env"
+  set +a
+fi
 
 unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_SDK_LOAD_CONFIG
 
@@ -26,7 +28,7 @@ if ! command -v aws >/dev/null 2>&1 && [[ -z "${AWS_CLI:-}" ]]; then
 fi
 
 if [[ -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
-  echo "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required in .env" >&2
+  echo "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required (export or set in .env)" >&2
   exit 1
 fi
 
