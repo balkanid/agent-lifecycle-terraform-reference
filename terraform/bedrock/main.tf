@@ -48,7 +48,7 @@ resource "aws_iam_role" "execution" {
             "aws:SourceAccount" = var.aws_account_id
           }
         }
-      } : {
+        } : {
         Effect = "Allow"
         Principal = {
           Service = "bedrock-agentcore.amazonaws.com"
@@ -80,7 +80,7 @@ resource "aws_iam_role_policy" "invoke" {
         Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
         Resource = "*"
       }
-    ] : [
+      ] : [
       {
         Effect = "Allow"
         Action = [
