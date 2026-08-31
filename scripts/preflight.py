@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 
 from balkanid_api import env_optional, load_dotenv, log_stderr
@@ -15,6 +18,52 @@ def is_true(name: str, default: str = "false") -> bool:
 def require(name: str, errors: list[str]) -> None:
     if not env_optional(name):
         errors.append(f"missing {name}")
+
+
+def _check_aws_iam_policy(warnings: list[str], errors: list[str]) -> None:
+    if not shutil.which("aws"):
+        warnings.append("aws CLI not available — skipping IAM policy smoke test")
+        return
+    region = env_optional("AWS_REGION", "us-east-1")
+    agent_name = env_optional("AGENT_NAME", "demo-support-agent")
+    env = {
+        **os.environ,
+        "AWS_DEFAULT_REGION": region,
+    }
+    for key in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+        val = env_optional(key)
+        if val:
+            env[key] = val
+    try:
+        proc = subprocess.run(
+            [
+                "aws",
+                "iam",
+                "list-roles",
+                "--query",
+                f"Roles[?RoleName=='{agent_name}'] | length(@)",
+                "--output",
+                "text",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        warnings.append(f"IAM policy smoke test skipped: {exc}")
+        return
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        if "AccessDenied" in err or "not authorized" in err:
+            errors.append(
+                "bedrock-lifecycle.user lacks iam:ListRoles — replace the attached policy with "
+                "aws/bedrock-agent-lifecycle-iam-policy.json (full replace, not merge)"
+            )
+        else:
+            warnings.append(f"IAM policy smoke test failed: {err}")
+        return
+    log_stderr("preflight: iam:ListRoles ok")
 
 
 def main() -> int:
@@ -42,6 +91,7 @@ def main() -> int:
         if provision:
             require("AWS_ACCESS_KEY_ID", errors)
             require("AWS_SECRET_ACCESS_KEY", errors)
+            _check_aws_iam_policy(warnings, errors)
         if sync and provision:
             require("INTEGRATION_ID", errors)
 

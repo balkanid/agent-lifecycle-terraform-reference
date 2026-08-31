@@ -7,27 +7,9 @@ locals {
   harness_name = replace(var.agent_name, "-", "_")
 }
 
-# Single IAM role for both backends — trust/policy update in place when switching
-# agent_backend, avoiding EntityAlreadyExists on the shared role name.
-moved {
-  from = aws_iam_role.agentcore
-  to   = aws_iam_role.execution
-}
-
-moved {
-  from = aws_iam_role.bedrock_classic
-  to   = aws_iam_role.execution
-}
-
-moved {
-  from = aws_iam_role_policy.agentcore_invoke
-  to   = aws_iam_role_policy.invoke
-}
-
-moved {
-  from = aws_iam_role_policy.bedrock_classic_invoke
-  to   = aws_iam_role_policy.invoke
-}
+# Legacy IAM resource renames (agentcore|bedrock_classic -> execution|invoke) are handled
+# in scripts/cleanup-agentcore-before-apply.sh via terraform state mv/rm — not moved{} blocks,
+# which error when both legacy addresses could exist in cached state.
 
 resource "aws_iam_role" "execution" {
   count = 1

@@ -38,10 +38,12 @@ agent_name="${AGENT_NAME:-demo-support-agent}"
 harness_name="${agent_name//-/_}"
 role_name="${agent_name}"
 role_path="/balkanid-agent-lifecycle/"
-harness_in_state=false
 
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 export AWS_DEFAULT_REGION="$region"
+
+# shellcheck source=scripts/reconcile-terraform-iam-state.sh
+source "$root/scripts/reconcile-terraform-iam-state.sh"
 
 terraform_state_list() {
   if [[ ! -d "$tf_dir/.terraform" ]]; then
@@ -53,16 +55,6 @@ terraform_state_list() {
 state_has() {
   local resource="$1"
   terraform_state_list | grep -Fxq "$resource"
-}
-
-iam_role_policy_resource() {
-  local role_resource="$1"
-  case "$role_resource" in
-    'aws_iam_role.execution[0]') echo 'aws_iam_role_policy.invoke[0]' ;;
-    'aws_iam_role.agentcore[0]') echo 'aws_iam_role_policy.agentcore_invoke[0]' ;;
-    'aws_iam_role.bedrock_classic[0]') echo 'aws_iam_role_policy.bedrock_classic_invoke[0]' ;;
-    *) echo "" ;;
-  esac
 }
 
 harness_in_state=false
@@ -136,17 +128,7 @@ report_role_unverified() {
 }
 
 remove_iam_from_terraform_state() {
-  local role_resource="$1"
-  local policy_resource
-  policy_resource="$(iam_role_policy_resource "$role_resource")"
-  if [[ -n "$policy_resource" ]] && state_has "$policy_resource"; then
-    echo "  -> terraform state rm ${policy_resource}"
-    (cd "$tf_dir" && terraform state rm "$policy_resource")
-  fi
-  if state_has "$role_resource"; then
-    echo "  -> terraform state rm ${role_resource}"
-    (cd "$tf_dir" && terraform state rm "$role_resource")
-  fi
+  purge_all_iam_from_state
 }
 
 delete_iam_role_in_aws() {
@@ -168,62 +150,33 @@ delete_iam_role_in_aws() {
   aws_cli iam delete-role --role-name "$role_name" --no-cli-pager
 }
 
-reconcile_iam_role() {
-  local role_resource="$1"
-  local status path arn detail
-
+reconcile_iam_for_apply() {
+  local status
   status="$(iam_role_status)" || return 1
 
   case "$status" in
     lifecycle)
-      if state_has "$role_resource"; then
-        echo "IAM role ${role_name} exists under ${role_path} and in Terraform state — OK."
-      else
-        echo "IAM role ${role_name} exists under ${role_path} but not in Terraform state — OK (apply will adopt)."
-      fi
-      return 0
+      echo "IAM role ${role_name} verified under ${role_path}."
       ;;
     absent)
-      if state_has "$role_resource"; then
-        echo "IAM role ${role_name} is in Terraform state but absent in AWS — removing from state."
-        remove_iam_from_terraform_state "$role_resource"
-      else
-        echo "No IAM role named ${role_name} — apply will create it under ${role_path}."
-      fi
-      return 0
+      echo "No IAM role ${role_name} in AWS — apply will create under ${role_path}."
       ;;
     unverified)
-      if [[ "$harness_ready_in_aws" == true ]]; then
-        report_role_unverified
-        if state_has "$role_resource"; then
-          echo "Removing IAM role from Terraform state so apply can recreate under ${role_path}."
-          remove_iam_from_terraform_state "$role_resource"
-        fi
-        return 0
-      fi
-      report_role_outside_lifecycle_path "(iam:GetRole denied; role not found via iam:ListRoles — may not exist or may be hidden by SCP)"
-      echo "error: Re-run with a READY harness, run CD destroy + sweep first, or ask IAM admin to verify." >&2
-      return 1
-      ;;
-    outside|*)
-      path="${status#outside|}"
-      arn="${path#*|}"
-      path="${path%%|*}"
-      detail="path=${path} arn=${arn}"
-      if [[ "$harness_ready_in_aws" == true ]]; then
-        echo "warning: ${role_name} exists at ${path} (not ${role_path}) while harness is READY." >&2
-        echo "warning: ${detail}" >&2
-        echo "warning: Terraform apply may fail if the role name is reserved — continuing." >&2
-        return 0
-      fi
-      report_role_outside_lifecycle_path "$detail"
-      return 1
-      ;;
-    *)
-      echo "error: unexpected IAM role status: ${status}" >&2
-      return 1
+      report_role_unverified
       ;;
   esac
+
+  if [[ "$status" == outside\|* ]]; then
+    if [[ "$harness_ready_in_aws" == true ]]; then
+      echo "warning: ${role_name} exists outside ${role_path} — will recreate under lifecycle path on apply." >&2
+    else
+      report_role_outside_lifecycle_path "${status#outside|}"
+      echo "error: Delete the conflicting role or use a different AGENT_NAME." >&2
+      return 1
+    fi
+  fi
+
+  reconcile_terraform_iam_state "$status"
 }
 
 delete_harness_if_orphan_or_failed() {
@@ -284,19 +237,8 @@ for h in json.load(sys.stdin).get('harnesses') or []:
 }
 
 reset_iam_for_fresh_apply() {
-  local role_resource="$1"
   echo "Harness not in Terraform state — resetting IAM role for a clean apply (typical after destroy or partial teardown)."
-  remove_iam_from_terraform_state "$role_resource"
-  # Belt-and-suspenders: remove any IAM role/policy still in state (e.g. if case patterns missed [0] resources).
-  while IFS= read -r resource; do
-    [[ -z "$resource" ]] && continue
-    case "$resource" in
-      aws_iam_role.*|aws_iam_role_policy.*)
-        echo "  -> terraform state rm ${resource}"
-        (cd "$tf_dir" && terraform state rm "$resource")
-        ;;
-    esac
-  done <<< "$(terraform_state_list)"
+  purge_all_iam_from_state
   if aws_cli iam list-role-policies --role-name "$role_name" --no-cli-pager >/dev/null 2>&1; then
     echo "Deleting IAM role ${role_name} from AWS so apply can recreate it."
     delete_iam_role_in_aws
@@ -310,12 +252,10 @@ echo "==> AgentCore pre-apply reconciliation (agent=${agent_name}, region=${regi
 
 delete_harness_if_orphan_or_failed
 
-role_resource="aws_iam_role.execution[0]"
-
 if [[ "$harness_in_state" == true ]]; then
-  reconcile_iam_role "$role_resource"
+  reconcile_iam_for_apply
 else
-  reset_iam_for_fresh_apply "$role_resource"
+  reset_iam_for_fresh_apply
 fi
 
 echo "==> AgentCore memory cleanup"
