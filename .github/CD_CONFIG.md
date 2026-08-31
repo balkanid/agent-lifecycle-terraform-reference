@@ -99,7 +99,7 @@ Set `BALKANID_INTEGRATION_ID` to your AWS integration in BalkanID. Disable sync 
 2. Set secrets: API key id + secret, AWS credentials.
 3. Actions → **CD** → Run workflow → `apply`.
 4. Approve each request in BalkanID while the job waits.
-5. Run `destroy` to tear down AWS resources (uses cached Terraform state). CD runs **`cleanup-after-destroy.sh`** afterward (even if Terraform fails) to delete lingering harnesses, Classic agents, AgentCore memory, and the lifecycle-path IAM role.
+5. Run `destroy` to tear down AWS resources (uses cached Terraform state). CD runs pre-destroy reconciliation, then **`cleanup-after-destroy.sh`** afterward (even if Terraform fails) to delete lingering harnesses, Classic agents, AgentCore memory, and the lifecycle-path IAM role.
 
 Bedrock and AgentCore must be enabled in your chosen region when `PROVISION_AWS_AGENT=true`. Default **`AGENT_BACKEND=agentcore`** works on new AWS accounts.
 

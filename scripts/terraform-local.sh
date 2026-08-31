@@ -109,6 +109,13 @@ case "$cmd" in
     echo "==> Terraform destroy (role + harness)" >&2
     cd "$root/terraform/bedrock"
     terraform init -input=false
+
+    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$backend_lc" == "agentcore" ]]; then
+      echo "==> AgentCore pre-destroy reconciliation" >&2
+      "$root/scripts/reconcile-agentcore-before-destroy.sh"
+    fi
+
     terraform destroy -auto-approve \
       -var="aws_credentials_file=${cred_file}" \
       -var="aws_account_id=${account_id}" \
@@ -199,6 +206,13 @@ case "$cmd" in
     write_aws_credentials_file "$cred_file"
     cd "$root/terraform/bedrock"
     terraform init -input=false
+
+    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$backend_lc" == "agentcore" ]]; then
+      echo "==> AgentCore pre-destroy reconciliation" >&2
+      "$root/scripts/reconcile-agentcore-before-destroy.sh"
+    fi
+
     terraform destroy -auto-approve \
       -var="aws_credentials_file=${cred_file}" \
       -var="aws_account_id=${account_id}" \
@@ -210,6 +224,9 @@ case "$cmd" in
     echo "==> AWS resource sweep after destroy" >&2
     "$root/scripts/cleanup-after-destroy.sh"
     ;;
+  cleanup-agentcore-on-destroy)
+    exec "$root/scripts/cleanup-agentcore-on-destroy.sh" "$@"
+    ;;
   cleanup-agentcore-memory)
     exec "$root/scripts/cleanup-agentcore-memory.sh" "$@"
     ;;
@@ -220,7 +237,7 @@ case "$cmd" in
     exec "$root/scripts/cleanup-after-destroy.sh" "$@"
     ;;
   *)
-    echo "Usage: $0 {apply-bedrock|apply-lifecycle|destroy-lifecycle|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-before-apply|cleanup-after-destroy}" >&2
+    echo "Usage: $0 {apply-bedrock|apply-lifecycle|destroy-lifecycle|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-before-apply|cleanup-agentcore-on-destroy|cleanup-after-destroy}" >&2
     exit 1
     ;;
 esac

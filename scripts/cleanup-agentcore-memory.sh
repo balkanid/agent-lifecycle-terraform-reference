@@ -41,7 +41,6 @@ export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 export AWS_DEFAULT_REGION="$region"
 
 list_matching_memory_ids() {
-  # Match by memory name (CreateMemory collision) and by id prefix (managed memory ARN suffix).
   aws_cli bedrock-agentcore-control list-memories \
     --region "$region" \
     --no-cli-pager \
@@ -81,19 +80,21 @@ fi
 echo "Deleting AgentCore memories matching '${harness_name}': ${memory_ids}"
 for memory_id in $memory_ids; do
   echo "  -> delete-memory ${memory_id}"
-  delete_err=""
-  if ! delete_err="$(aws_cli bedrock-agentcore-control delete-memory \
+  delete_rc=0
+  delete_err="$(aws_cli bedrock-agentcore-control delete-memory \
     --memory-id "$memory_id" \
     --region "$region" \
-    --no-cli-pager 2>&1 >/dev/null)"; then
-    if echo "$delete_err" | grep -qE 'managed and cannot be deleted directly|ValidationException'; then
-      echo "  -> skip managed memory ${memory_id} (delete harness first)"
-      continue
-    fi
-    echo "error: failed to delete memory ${memory_id}: ${delete_err}" >&2
-    exit 1
+    --no-cli-pager 2>&1)" || delete_rc=$?
+  if [[ "$delete_rc" -eq 0 ]]; then
+    wait_for_memory_gone "$memory_id"
+    continue
   fi
-  wait_for_memory_gone "$memory_id"
+  if echo "$delete_err" | grep -qiE 'managed and cannot be deleted|ValidationException'; then
+    echo "warning: memory ${memory_id} is managed by AgentCore and cannot be deleted directly — skipping (delete harness first)" >&2
+    continue
+  fi
+  echo "error: failed to delete memory ${memory_id}: ${delete_err}" >&2
+  exit 1
 done
 
 echo "AgentCore memory cleanup complete."
