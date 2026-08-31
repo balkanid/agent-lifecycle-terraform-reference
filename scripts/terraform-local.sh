@@ -127,6 +127,13 @@ case "$cmd" in
     write_aws_credentials_file "$cred_file"
     cd "$root/terraform/bedrock"
     terraform init -input=false
+
+    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$backend_lc" == "agentcore" ]]; then
+      echo "==> AgentCore pre-destroy reconciliation" >&2
+      "$root/scripts/reconcile-agentcore-before-destroy.sh"
+    fi
+
     terraform destroy -auto-approve \
       -var="aws_credentials_file=${cred_file}" \
       -var="aws_account_id=${account_id}" \

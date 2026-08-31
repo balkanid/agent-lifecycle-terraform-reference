@@ -206,6 +206,16 @@ jobs:
         if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT != 'true'
         run: echo "::notice::Gate approved. PROVISION_AWS_AGENT=false — no AWS resources to apply."
 
+      - name: AgentCore pre-destroy reconciliation
+        if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true' && env.AGENT_BACKEND == 'agentcore'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AGENT_NAME: ${{ env.AGENT_NAME }}
+          AGENT_BACKEND: ${{ env.AGENT_BACKEND }}
+        run: bash scripts/reconcile-agentcore-before-destroy.sh
+
       - name: Terraform destroy
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true'
         working-directory: terraform/bedrock
