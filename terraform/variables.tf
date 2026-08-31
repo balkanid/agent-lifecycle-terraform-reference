@@ -26,11 +26,13 @@ variable "api_key_secret" {
 
 variable "agent_owner_email" {
   type        = string
+  sensitive   = true
   description = "Email of the employee who will own the agent (createRequest employeeEmail)."
 }
 
 variable "integration_id" {
   type        = string
+  sensitive   = true
   default     = ""
   description = "Optional integration id for createRequest AGENT_ACCESS payload."
 }

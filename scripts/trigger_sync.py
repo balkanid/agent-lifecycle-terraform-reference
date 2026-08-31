@@ -12,7 +12,7 @@ import os
 import sys
 
 # Reuse gate helpers (same repo, no extra deps).
-from gate import env, gql, load_dotenv
+from gate import ci_mode, env, gql, load_dotenv, log_stderr, redact_identifier
 
 SYNC = """
 mutation SyncIntegration($input: SyncIntegrationInput!) {
@@ -44,23 +44,28 @@ def main() -> int:
     secret = env("API_KEY_SECRET")
     iid = integration_id()
 
-    print(f"triggering sync integration_id={iid!r}", file=sys.stderr)
+    if ci_mode():
+        log_stderr("triggering integration sync")
+    else:
+        log_stderr(f"triggering sync integration_id={iid!r}")
     result = gql(url, key_id, secret, SYNC, {"input": {"integrationId": iid}})
     out = result.get("syncIntegration") or {}
     if not out.get("success"):
+        if ci_mode():
+            raise SystemExit("syncIntegration failed (details suppressed in CI logs)")
         raise SystemExit(f"syncIntegration failed: {out}")
 
     correlation_id = out.get("correlationId") or ""
     print(
         json.dumps(
             {
-                "integration_id": iid,
+                "integration_id": redact_identifier(iid) if ci_mode() else iid,
                 "correlation_id": correlation_id,
                 "status": "accepted",
             }
         )
     )
-    print(f"sync accepted correlation_id={correlation_id!r}", file=sys.stderr)
+    log_stderr(f"sync accepted correlation_id={correlation_id!r}")
     return 0
 
 

@@ -11,8 +11,13 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 |---|---|---|
 | `BALKANID_API_KEY_ID` | Always | Employee API key id |
 | `BALKANID_API_KEY_SECRET` | Always | Employee API key secret |
-| `AWS_ACCESS_KEY_ID` | When `PROVISION_AWS_AGENT=true` | IAM user with **full** [`aws/bedrock-agent-lifecycle-iam-policy.json`](../aws/bedrock-agent-lifecycle-iam-policy.json) — replace the entire policy in AWS; see [`aws/PERMISSIONS.md`](../aws/PERMISSIONS.md) |
+| `AWS_ACCESS_KEY_ID` | When `PROVISION_AWS_AGENT=true` | IAM user with **full** [`aws/bedrock-agent-lifecycle-iam-policy.json`](../aws/bedrock-agent-lifecycle-iam-policy.json) |
 | `AWS_SECRET_ACCESS_KEY` | When `PROVISION_AWS_AGENT=true` | Matching AWS secret |
+| `BALKANID_PUBLIC_API_URL` | Recommended as secret | Public API base URL — use a **secret** (not variable) to keep tenant URL out of workflow logs |
+| `BALKANID_AGENT_OWNER_EMAIL` | Recommended as secret | Agent owner email — use a **secret** if you do not want employee email in logs |
+| `BALKANID_INTEGRATION_ID` | Recommended as secret when set | Integration id — use a **secret** if you do not want it in logs |
+
+When the same name exists as both secret and variable, the workflow uses the **secret**.
 
 ## Variables (non-sensitive — visible in logs)
 
@@ -20,10 +25,10 @@ Add **variables** and **secrets** on that environment (or at repo level — the 
 |---|---|---|---|
 | `PROVISION_AWS_AGENT` | No | `false` | **`true`** to provision an AWS agent (AgentCore harness or Classic agent) after gate approval. `false` = gate-only. |
 | `AGENT_BACKEND` | No | `agentcore` | When `PROVISION_AWS_AGENT=true`: `agentcore` (new accounts) or `classic` (allowlisted Classic accounts). |
-| `TRIGGER_INTEGRATION_SYNC` | No | `true` | After successful Terraform apply, call Public API `syncIntegration` for `BALKANID_INTEGRATION_ID` |
-| `BALKANID_PUBLIC_API_URL` | Yes | — | Public API base URL, e.g. `https://your-tenant.balkanid.app/api/public` |
-| `BALKANID_AGENT_OWNER_EMAIL` | Yes | — | Employee who will own the agent (`createRequest.employeeEmail`) |
-| `BALKANID_INTEGRATION_ID` | When sync enabled | *(empty)* | AWS integration id — used on the access request and for post-apply `syncIntegration` |
+| `TRIGGER_INTEGRATION_SYNC` | No | `true` | After successful Terraform apply, call Public API `syncIntegration` |
+| `BALKANID_PUBLIC_API_URL` | Yes (or secret) | — | Public API base URL, e.g. `https://your-tenant.balkanid.app/api/public` |
+| `BALKANID_AGENT_OWNER_EMAIL` | Yes (or secret) | — | Employee who will own the agent |
+| `BALKANID_INTEGRATION_ID` | When sync enabled (or secret) | *(empty)* | AWS integration id |
 | `APPROVAL_WAIT_MINUTES` | No | `120` | Max minutes the gate polls before failing (no AWS resources created) |
 | `AGENT_NAME` | No | `demo-support-agent` | Agent / Terraform resource name |
 | `AGENT_PURPOSE` | No | `Agent provisioned via Terraform with BalkanID approval` | Purpose string passed as `createRequest.reason` |
@@ -35,12 +40,11 @@ Account id for Terraform IAM trust policies is resolved at runtime via `aws sts 
 
 | Treat as **secret** | Treat as **variable** |
 |---|---|
-| API key id/secret | Tenant Public API URL |
-| AWS access keys | Employee email, integration id |
-| Passwords, tokens | `PROVISION_AWS_AGENT`, region, agent metadata |
-| Anything that authenticates | Timeouts, agent names, purpose strings |
+| API key id/secret | `PROVISION_AWS_AGENT`, `AGENT_BACKEND`, region |
+| AWS access keys | Agent name, purpose, timeouts |
+| Tenant URL, employee email, integration id (recommended) | Non-identifying workflow toggles |
 
-Employee email and integration id are identifiers, not credentials — variables are fine and easier to audit. Rotate API keys via secrets only.
+Employee email and integration id can be variables for convenience, but **secrets are recommended** for public repositories so they are masked in logs. See [SECURITY.md](../SECURITY.md).
 
 ## Per-run workflow overrides
 

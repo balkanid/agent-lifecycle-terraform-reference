@@ -34,6 +34,15 @@ jobs:
       - name: Compile gate scripts
         run: python3 -m py_compile scripts/gate.py scripts/trigger_sync.py
 
+      - name: Block tracked secret files
+        run: |
+          for f in .env terraform/bedrock/terraform.tfstate; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              echo "Sensitive file must not be tracked: $f"
+              exit 1
+            fi
+          done
+
   terraform:
     name: Terraform
     runs-on: ubuntu-latest

@@ -62,6 +62,27 @@ USER_AGENT = (
 )
 
 
+def ci_mode() -> bool:
+    return os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or os.environ.get("CI", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def log_stderr(message: str) -> None:
+    print(message, file=sys.stderr)
+
+
+def redact_identifier(value: str, visible: int = 4) -> str:
+    value = value.strip()
+    if not value:
+        return "(empty)"
+    if len(value) <= visible:
+        return "***"
+    return f"***{value[-visible:]}"
+
+
 def load_dotenv() -> None:
     """Load repo-root .env when vars are not already exported (local dev convenience)."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -136,6 +157,8 @@ def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict
         detail = err.read().decode() if err.fp else ""
         raise SystemExit(http_error_message(err.code, detail, url)) from err
     if payload.get("errors"):
+        if ci_mode():
+            raise SystemExit("GraphQL request failed (error details suppressed in CI logs)")
         raise SystemExit(json.dumps(payload["errors"], indent=2))
     data = payload.get("data")
     if not data:
@@ -176,8 +199,12 @@ def main() -> int:
     if not reason:
         reason = f"Terraform gate for agent {agent}"
 
-    print(f"public API url={url}", file=sys.stderr)
-    print(f"creating agent access request owner={owner!r} agent={agent!r}", file=sys.stderr)
+    if ci_mode():
+        log_stderr("public API url=(redacted in CI)")
+        log_stderr(f"creating agent access request owner={redact_identifier(owner)} agent={agent!r}")
+    else:
+        log_stderr(f"public API url={url}")
+        log_stderr(f"creating agent access request owner={owner!r} agent={agent!r}")
 
     agent_access: dict = {
         "action": "CREATE",
@@ -202,11 +229,13 @@ def main() -> int:
     if created.get("stepUpRequired"):
         raise SystemExit("step-up MFA required on createRequest; complete MFA and retry")
     if not created.get("success") or not created.get("id"):
+        if ci_mode():
+            raise SystemExit("createRequest failed (details suppressed in CI logs)")
         raise SystemExit(f"createRequest failed: {created}")
 
     request_id = created["id"]
-    print(f"request_id={request_id}", file=sys.stderr)
-    print("waiting for approval in BalkanID (fail closed on deny/timeout)", file=sys.stderr)
+    log_stderr(f"request_id={request_id}")
+    log_stderr("waiting for approval in BalkanID (fail closed on deny/timeout)")
 
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -223,10 +252,7 @@ def main() -> int:
             status = node.get("status")
             approval = node.get("requestApprovalStatus")
             req_type = node.get("requestType")
-            print(
-                f"status={status!r} approval={approval!r} requestType={req_type!r}",
-                file=sys.stderr,
-            )
+            log_stderr(f"status={status!r} approval={approval!r} requestType={req_type!r}")
             outcome = terminal(status, approval)
             if outcome == "approved":
                 print(json.dumps({"request_id": request_id, "status": "approved"}))
@@ -236,7 +262,7 @@ def main() -> int:
                 return 1
         time.sleep(poll_s)
 
-    print(f"timed out after {timeout_s}s waiting on {request_id}", file=sys.stderr)
+    log_stderr(f"timed out after {timeout_s}s waiting on {request_id}")
     return 1
 
 

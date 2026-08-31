@@ -131,6 +131,10 @@ When `TRIGGER_INTEGRATION_SYNC=true` and `INTEGRATION_ID` is set, `apply-bedrock
 
 Pass secrets via `-var`, `TF_VAR_*`, or a gitignored `terraform.tfvars` file.
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for GitHub Actions hardening, secret vs variable guidance, and what is (and is not) written to workflow logs.
+
 ## CI / CD (GitHub Actions)
 
 ### CI

@@ -9,3 +9,7 @@ crash.log
 __pycache__/
 *.pyc
 .venv/
+actionlint
+*.pem
+*credentials*
+.aws/

@@ -85,11 +85,10 @@ jobs:
       AGENT_NAME: ${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.AGENT_NAME || 'demo-support-agent' }}
       AGENT_BACKEND: ${{ github.event.inputs.agent_backend == 'use-env' && (vars.AGENT_BACKEND || 'agentcore') || github.event.inputs.agent_backend }}
       TRIGGER_INTEGRATION_SYNC: ${{ github.event.inputs.trigger_integration_sync == 'use-env' && (vars.TRIGGER_INTEGRATION_SYNC || 'true') || github.event.inputs.trigger_integration_sync }}
-      BALKANID_PUBLIC_API_URL: ${{ vars.BALKANID_PUBLIC_API_URL }}
-      BALKANID_AGENT_OWNER_EMAIL: ${{ vars.BALKANID_AGENT_OWNER_EMAIL }}
-      BALKANID_INTEGRATION_ID: ${{ vars.BALKANID_INTEGRATION_ID }}
       AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Agent provisioned via Terraform with BalkanID approval' }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      TF_LOG: ERROR
+      TF_INPUT: "0"
 
     steps:
       - uses: actions/checkout@v4
@@ -123,11 +122,14 @@ jobs:
       - name: BalkanID gate
         if: github.event.inputs.operation == 'apply'
         env:
+          BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
+          BALKANID_AGENT_OWNER_EMAIL: ${{ secrets.BALKANID_AGENT_OWNER_EMAIL || vars.BALKANID_AGENT_OWNER_EMAIL }}
           API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
           API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
-          INTEGRATION_ID: ${{ env.BALKANID_INTEGRATION_ID }}
+          INTEGRATION_ID: ${{ secrets.BALKANID_INTEGRATION_ID || vars.BALKANID_INTEGRATION_ID }}
           AGENT_TYPE: terraform
         run: |
+          set +x
           export POLL_SECONDS=5
           export POLL_TIMEOUT_SECONDS=$((APPROVAL_WAIT_MINUTES * 60))
           echo "::notice::provision_aws_agent=${PROVISION_AWS_AGENT}"
@@ -142,6 +144,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
+          set +x
           umask 077
           printf '%s\n' '[terraform]' "aws_access_key_id = ${AWS_ACCESS_KEY_ID}" "aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}" > /tmp/terraform-aws-credentials
 
@@ -153,8 +156,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
+          set +x
           account_id="$(aws sts get-caller-identity --query Account --output text)"
           echo "account_id=${account_id}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Resolved AWS account (last 4 digits): ***${account_id: -4}"
 
       - name: Terraform init
         if: env.PROVISION_AWS_AGENT == 'true'
@@ -181,19 +186,22 @@ jobs:
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
         run: |
-          echo "::notice::Applying AWS agent backend=${AGENT_BACKEND} account=${TF_VAR_aws_account_id}"
-          terraform apply -auto-approve -input=false
+          set +x
+          echo "::notice::Applying AWS agent backend=${AGENT_BACKEND}"
+          terraform apply -auto-approve -input=false -no-color
 
       - name: Trigger integration sync
         if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT == 'true' && env.TRIGGER_INTEGRATION_SYNC == 'true'
         env:
+          BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
           API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
           API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
-          INTEGRATION_ID: ${{ env.BALKANID_INTEGRATION_ID }}
+          INTEGRATION_ID: ${{ secrets.BALKANID_INTEGRATION_ID || vars.BALKANID_INTEGRATION_ID }}
           TRIGGER_INTEGRATION_SYNC: ${{ env.TRIGGER_INTEGRATION_SYNC }}
         run: |
+          set +x
           if [[ -z "${INTEGRATION_ID}" ]]; then
-            echo "::warning::BALKANID_INTEGRATION_ID not set — skipping post-apply sync"
+            echo "::warning::Integration id not set — skipping post-apply sync"
             exit 0
           fi
           cd "${{ github.workspace }}/scripts"
@@ -212,7 +220,7 @@ jobs:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
-        run: terraform destroy -auto-approve -input=false
+        run: terraform destroy -auto-approve -input=false -no-color
 
       - name: AgentCore memory cleanup
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true' && env.AGENT_BACKEND == 'agentcore'
@@ -227,7 +235,7 @@ jobs:
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT != 'true'
         run: echo "::notice::PROVISION_AWS_AGENT=false — no Terraform state/AWS resources to destroy."
 
-      - name: Outputs
+      - name: Apply complete
         if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT == 'true'
         working-directory: terraform/bedrock
-        run: terraform output -json
+        run: echo "::notice::Terraform apply finished. Resource ids are in workflow state cache — not printed to logs."
