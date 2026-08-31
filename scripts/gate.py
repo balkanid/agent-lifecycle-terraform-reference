@@ -58,7 +58,7 @@ DENIED = {
 
 USER_AGENT = (
     "balkanid-agent-lifecycle-reference/1.0 "
-    "(+https://github.com/balkanid/agent-lifecycle-terraform-pov)"
+    "(+https://github.com/balkanid/agent-lifecycle-terraform-reference)"
 )
 
 
