@@ -65,6 +65,48 @@ iam_role_policy_resource() {
   esac
 }
 
+lifecycle_path_role_exists() {
+  local count
+  count="$(aws_cli iam list-roles \
+    --path-prefix "$role_path" \
+    --query "length(Roles[?RoleName=='${role_name}'])" \
+    --output text \
+    --no-cli-pager 2>/dev/null || echo "0")"
+  [[ "$count" == "1" ]]
+}
+
+iam_role_blocked_outside_lifecycle_path() {
+  local get_err="" get_rc=0 actual_path=""
+
+  if lifecycle_path_role_exists; then
+    return 1
+  fi
+
+  if aws_cli iam get-role --role-name "$role_name" --no-cli-pager >/dev/null 2>&1; then
+    actual_path="$(aws_cli iam get-role --role-name "$role_name" --query 'Role.Path' --output text --no-cli-pager)"
+    if [[ "$actual_path" != "$role_path" ]]; then
+      return 0
+    fi
+    return 1
+  fi
+
+  get_err="$(aws_cli iam get-role --role-name "$role_name" --no-cli-pager 2>&1)" || get_rc=$?
+  if echo "$get_err" | grep -q 'NoSuchEntity'; then
+    return 1
+  fi
+  if echo "$get_err" | grep -qE 'AccessDenied|not authorized'; then
+    return 0
+  fi
+  echo "error: cannot read IAM role ${role_name} (exit ${get_rc}): ${get_err}" >&2
+  return 2
+}
+
+report_role_outside_lifecycle_path() {
+  echo "error: IAM role ${role_name} exists outside ${role_path} (often BalkanID app provisioning on CREATE_SERVICE_ACCOUNT)." >&2
+  echo "error: Terraform can only manage roles under role/balkanid-agent-lifecycle/*." >&2
+  echo "error: Disable app provisioning on the AWS integration, delete the conflicting IAM role, then re-run CD." >&2
+}
+
 remove_iam_from_terraform_state() {
   local role_resource="$1"
   local policy_resource
@@ -100,9 +142,22 @@ delete_iam_role_in_aws() {
 
 reconcile_iam_role() {
   local role_resource="$1"
-  local get_err="" get_rc=0 actual_path=""
+  local blocked_rc=0
 
-  if aws_cli iam get-role --role-name "$role_name" --no-cli-pager >/dev/null 2>&1; then
+  iam_role_blocked_outside_lifecycle_path || blocked_rc=$?
+  case "$blocked_rc" in
+    0)
+      report_role_outside_lifecycle_path
+      return 1
+      ;;
+    2)
+      echo "error: ensure your Terraform IAM user has the full aws/bedrock-agent-lifecycle-iam-policy.json attached in AWS (replace entire policy)." >&2
+      return 1
+      ;;
+  esac
+
+  if lifecycle_path_role_exists; then
+    local actual_path
     actual_path="$(aws_cli iam get-role --role-name "$role_name" --query 'Role.Path' --output text --no-cli-pager)"
     if [[ "$actual_path" != "$role_path" ]]; then
       echo "IAM role ${role_name} exists at path ${actual_path} (expected ${role_path})."
@@ -122,20 +177,13 @@ reconcile_iam_role() {
     return 0
   fi
 
-  get_err="$(aws_cli iam get-role --role-name "$role_name" --no-cli-pager 2>&1)" || get_rc=$?
-  if echo "$get_err" | grep -q 'NoSuchEntity'; then
-    if state_has "$role_resource"; then
-      echo "IAM role ${role_name} is in Terraform state but absent in AWS — removing from state."
-      remove_iam_from_terraform_state "$role_resource"
-    else
-      echo "No IAM role named ${role_name}."
-    fi
-    return 0
+  if state_has "$role_resource"; then
+    echo "IAM role ${role_name} is in Terraform state but absent in AWS — removing from state."
+    remove_iam_from_terraform_state "$role_resource"
+  else
+    echo "No IAM role named ${role_name} under ${role_path}."
   fi
-
-  echo "error: cannot read IAM role ${role_name} (exit ${get_rc}): ${get_err}" >&2
-  echo "error: ensure your Terraform IAM user has the full aws/bedrock-agent-lifecycle-iam-policy.json attached in AWS (replace entire policy)." >&2
-  return 1
+  return 0
 }
 
 delete_harness_if_orphan_or_failed() {
@@ -208,7 +256,7 @@ reset_iam_for_fresh_apply() {
         ;;
     esac
   done <<< "$(terraform_state_list)"
-  if aws_cli iam list-role-policies --role-name "$role_name" --no-cli-pager >/dev/null 2>&1; then
+  if aws_cli iam list-role-policies --role-name "$role_name" --no-cli-pager >/dev/null 2>&1 || lifecycle_path_role_exists; then
     echo "Deleting IAM role ${role_name} from AWS so apply can recreate it."
     delete_iam_role_in_aws
     echo "IAM role ${role_name} deleted."

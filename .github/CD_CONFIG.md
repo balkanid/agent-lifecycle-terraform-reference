@@ -89,7 +89,7 @@ CD run (apply)
   4. syncIntegration
 ```
 
-Gates wait for **approval only** — Terraform provisions AWS resources. Disable app provisioning on the demo AWS integration if you do not want the BalkanID provisioner to create IAM resources in parallel.
+Gates wait for **approval only** — Terraform provisions AWS resources. **Disable app provisioning** on the demo AWS integration when using `SERVICE_ACCOUNT_GATE=true`; otherwise BalkanID may create an IAM role at `/` with the same name as `AGENT_NAME`, which blocks Terraform (scoped to `/balkanid-agent-lifecycle/`).
 
 Set `BALKANID_INTEGRATION_ID` to your AWS integration in BalkanID. Disable sync with `TRIGGER_INTEGRATION_SYNC=false`.
 

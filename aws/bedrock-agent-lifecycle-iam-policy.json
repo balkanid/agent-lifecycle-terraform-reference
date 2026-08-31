@@ -64,6 +64,12 @@
       "Resource": "*"
     },
     {
+      "Sid": "IamListRolesForReconciliation",
+      "Effect": "Allow",
+      "Action": "iam:ListRoles",
+      "Resource": "*"
+    },
+    {
       "Sid": "IamRolesUnderLifecyclePath",
       "Effect": "Allow",
       "Action": [
