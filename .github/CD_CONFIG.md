@@ -106,3 +106,5 @@ Bedrock and AgentCore must be enabled in your chosen region when `PROVISION_AWS_
 Terraform state is cached per `AGENT_NAME` + branch when `PROVISION_AWS_AGENT=true`. For production, use a remote backend (for example S3 with locking).
 
 **Re-run vs new dispatch:** GitHub **“Re-run failed jobs”** reuses the commit from the original run. After fixes land on `main`, use **Actions → CD → Run workflow** (new dispatch) so the job checks out the latest code.
+
+See [`docs/TROUBLESHOOTING.md`](../docs/TROUBLESHOOTING.md) for common CD failures (IAM policy, stale state, app provisioning conflicts).
