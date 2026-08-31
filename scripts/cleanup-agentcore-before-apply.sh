@@ -183,20 +183,6 @@ reconcile_iam_role() {
       fi
       return 0
       ;;
-    outside|*)
-      path="${status#outside|}"
-      arn="${path#*|}"
-      path="${path%%|*}"
-      detail="path=${path} arn=${arn}"
-      if [[ "$harness_ready_in_aws" == true ]]; then
-        echo "warning: ${role_name} exists at ${path} (not ${role_path}) while harness is READY." >&2
-        echo "warning: ${detail}" >&2
-        echo "warning: Terraform apply may fail if the role name is reserved — continuing." >&2
-        return 0
-      fi
-      report_role_outside_lifecycle_path "$detail"
-      return 1
-      ;;
     absent)
       if state_has "$role_resource"; then
         echo "IAM role ${role_name} is in Terraform state but absent in AWS — removing from state."
@@ -217,6 +203,20 @@ reconcile_iam_role() {
       fi
       report_role_outside_lifecycle_path "(iam:GetRole denied; role not found via iam:ListRoles — may not exist or may be hidden by SCP)"
       echo "error: Re-run with a READY harness, run CD destroy + sweep first, or ask IAM admin to verify." >&2
+      return 1
+      ;;
+    outside|*)
+      path="${status#outside|}"
+      arn="${path#*|}"
+      path="${path%%|*}"
+      detail="path=${path} arn=${arn}"
+      if [[ "$harness_ready_in_aws" == true ]]; then
+        echo "warning: ${role_name} exists at ${path} (not ${role_path}) while harness is READY." >&2
+        echo "warning: ${detail}" >&2
+        echo "warning: Terraform apply may fail if the role name is reserved — continuing." >&2
+        return 0
+      fi
+      report_role_outside_lifecycle_path "$detail"
       return 1
       ;;
     *)
@@ -319,6 +319,10 @@ else
 fi
 
 echo "==> AgentCore memory cleanup"
-bash "$root/scripts/cleanup-agentcore-memory.sh"
+if [[ "$harness_ready_in_aws" == true ]]; then
+  echo "Skipping memory cleanup — harness is READY (memory is managed by the harness)."
+else
+  bash "$root/scripts/cleanup-agentcore-memory.sh"
+fi
 
 echo "AgentCore pre-apply reconciliation complete."
