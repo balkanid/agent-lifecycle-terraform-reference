@@ -1,8 +1,19 @@
 # Security
 
-## Reporting vulnerabilities
+## Reporting security issues
 
-If you believe you found a security issue in this reference repository, contact BalkanID through your account team or [BalkanID support](https://balkan.id/contact). Do not open public GitHub issues for credential leaks or tenant-specific findings.
+BalkanID does not publish a separate public bug bounty or vulnerability disclosure portal. Per the [BalkanID Trust Center](https://trustcenter.balkan.id/), report security questions, incidents, or concerns to **[security@balkan.id](mailto:security@balkan.id)**.
+
+When reporting a finding related to **this reference repository** (sample code, docs, or GitHub Actions workflows):
+
+1. Email **security@balkan.id** with a description, reproduction steps, and impact.
+2. Do **not** open a public GitHub issue for credential leaks, tenant-specific data, or exploitable vulnerabilities.
+3. Do **not** test against BalkanID production systems or customer tenants without authorization.
+4. Allow reasonable time for triage before public disclosure.
+
+For non-security bugs or documentation fixes in this repo, use [GitHub Issues](https://github.com/balkanid/agent-lifecycle-terraform-reference/issues).
+
+For vulnerabilities in the **BalkanID platform** (not this sample repo), use the same **security@balkan.id** contact. BalkanID’s [Vulnerability Management Policy](https://trustcenter.balkan.id/resources) describes internal handling; the full policy is available on request through the Trust Center.
 
 ## What this repo stores
 
