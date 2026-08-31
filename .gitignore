@@ -13,3 +13,4 @@ actionlint
 *.pem
 *credentials*
 .aws/
+.lifecycle_state.json

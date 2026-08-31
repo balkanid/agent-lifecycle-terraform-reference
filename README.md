@@ -30,6 +30,8 @@ When approval completes, BalkanID can also notify your automation via the **`req
 
 ```
 ├── scripts/gate.py          # createRequest (AGENT_ACCESS) + poll until terminal status
+├── scripts/lifecycle.py     # EN-8896 JIT identity lifecycle orchestrator
+├── scripts/balkanid_api.py  # Shared Public API helpers
 ├── scripts/trigger_sync.py  # syncIntegration after AWS resources are created
 ├── terraform/               # Gate-only stack (local-exec) + optional Bedrock module
 ├── aws/                     # Example least-privilege IAM policy for Terraform
@@ -106,6 +108,23 @@ Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your a
 
 When `TRIGGER_INTEGRATION_SYNC=true` and `INTEGRATION_ID` is set, `apply-bedrock` runs gate → Terraform → `syncIntegration`.
 
+### JIT identity lifecycle (EN-8896)
+
+Full demo flow: BalkanID creates the IAM service role and assigns entitlements, then Terraform creates only the AgentCore harness against that role:
+
+```bash
+# .env: LIFECYCLE_MODE=true, LIFECYCLE_POLICY_NAME=<managed policy in graph>, plus standard vars
+./scripts/terraform-local.sh apply-lifecycle
+```
+
+Teardown (harness first, then delete the BalkanID-provisioned role):
+
+```bash
+./scripts/terraform-local.sh destroy-lifecycle
+```
+
+In GitHub CD, set environment variable `LIFECYCLE_MODE=true` (or override per run) with `PROVISION_AWS_AGENT=true`. See [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md).
+
 ### Teardown and re-runs (AgentCore)
 
 ```bash
@@ -175,8 +194,12 @@ Attach [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecyc
 
 | API | Role in this reference |
 |---|---|
-| **`createRequest` (`AGENT_ACCESS`)** | Creates the agent access request before provisioning. Called by `scripts/gate.py`. |
+| **`createRequest` (`AGENT_ACCESS`)** | Creates the agent access request before provisioning. Called by `scripts/gate.py` (classic) or `scripts/lifecycle.py` (JIT mode). |
+| **`createRequest` (`CREATE_SERVICE_ACCOUNT`)** | JIT mode: BalkanID provisioner creates an AWS service role for AgentCore. |
+| **`createRequest` (`SERVICE_ACCOUNT_ASSIGNMENT`)** | JIT mode: attach managed policies (and optional duration) to the service role. |
+| **`createRequest` (`DELETE_SERVICE_ACCOUNT`)** | JIT teardown: delete the provisioned service role after harness destroy. |
 | **`requests` query** | Polls request status until approved or denied. |
+| **`identities` query** | Resolves provisioned service role entity id after create. |
 | **`syncIntegration`** | Triggers integration sync so BalkanID discovers the AWS agent after Terraform creates it. |
 
 The gate sends structured intent: owner email, `CREATE` action, agent name, agent type, and optional integration id and intended IAM role ARN. BalkanID stores the request; the agent entity appears after external provisioning and integration sync.

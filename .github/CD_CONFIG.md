@@ -33,6 +33,9 @@ When the same name exists as both secret and variable, the workflow uses the **s
 | `AGENT_NAME` | No | `demo-support-agent` | Agent / Terraform resource name |
 | `AGENT_PURPOSE` | No | `Agent provisioned via Terraform with BalkanID approval` | Purpose string passed as `createRequest.reason` |
 | `AWS_REGION` | No | `us-east-1` | AWS region when `PROVISION_AWS_AGENT=true` |
+| `LIFECYCLE_MODE` | No | `false` | **`true`** for EN-8896 JIT flow: create service role → assign policy → agent gate → harness-only Terraform |
+| `LIFECYCLE_POLICY_NAME` | When `LIFECYCLE_MODE=true` | `AmazonBedrockFullAccess` | Managed policy name for `SERVICE_ACCOUNT_ASSIGNMENT` (must exist in AWS + BalkanID graph) |
+| `LIFECYCLE_ROLE_NAME` | No | same as `AGENT_NAME` | IAM service role name created by BalkanID provisioner |
 
 Account id for Terraform IAM trust policies is resolved at runtime via `aws sts get-caller-identity`. Local runs can set `AWS_ACCOUNT_ID` in `.env` — see `scripts/terraform-local.sh`.
 
@@ -57,19 +60,44 @@ When you **Run workflow**, dropdowns default to **`use-env`** (read from environ
 | `agent_backend` | dropdown (`use-env` / `agentcore` / `classic`) | `AGENT_BACKEND` |
 | `trigger_integration_sync` | dropdown (`use-env` / `true` / `false`) | `TRIGGER_INTEGRATION_SYNC` |
 | `approval_wait_minutes` | dropdown (`use-env` / 30 / 60 / 120 / 240 / 360) | `APPROVAL_WAIT_MINUTES` |
+| `lifecycle_mode` | dropdown (`use-env` / `true` / `false`) | `LIFECYCLE_MODE` |
 | `agent_name` | text (optional) | `AGENT_NAME` |
 
 ## End-to-end apply flow (`PROVISION_AWS_AGENT=true`)
+
+**Classic (EN-8866, `LIFECYCLE_MODE=false`):**
 
 ```
 CD run (apply)
   1. gate.py          → createRequest (AGENT_ACCESS) + poll until approved/denied
   2. if denied        → job fails (no AWS resources)
-  3. if approved      → terraform apply (AGENT_BACKEND=agentcore|classic)
+  3. if approved      → terraform apply (role + harness/agent)
   4. if sync enabled  → syncIntegration(integrationId)
 ```
 
-Set `BALKANID_INTEGRATION_ID` to your AWS integration in BalkanID. Disable step 4 with `TRIGGER_INTEGRATION_SYNC=false`.
+**JIT identity lifecycle (EN-8896, `LIFECYCLE_MODE=true`):**
+
+```
+CD run (apply)
+  1. lifecycle.py apply-all
+       → CREATE_SERVICE_ACCOUNT (aws service role)
+       → SERVICE_ACCOUNT_ASSIGNMENT (managed policy, optional duration)
+       → patch AgentCore trust policy (AWS CLI)
+       → AGENT_ACCESS + poll approval
+  2. terraform apply  → AgentCore harness only (execution_role_arn from BalkanID)
+  3. syncIntegration  → discover harness + role in BalkanID
+```
+
+**Teardown (`LIFECYCLE_MODE=true`, destroy):**
+
+```
+  1. terraform destroy → remove harness (role stays in AWS until step 2)
+  2. lifecycle.py delete-identity → DELETE_SERVICE_ACCOUNT
+```
+
+Set `BALKANID_INTEGRATION_ID` to your AWS integration in BalkanID. Disable sync with `TRIGGER_INTEGRATION_SYNC=false`.
+
+When `LIFECYCLE_MODE=true`, the workflow also needs AWS credentials for the trust-policy patch step (`iam:UpdateAssumeRolePolicy` on the provisioned role). The default Terraform IAM policy scopes role management to `/balkanid-agent-lifecycle/`; provisioner-created roles may live at `/` — extend the CD principal if trust patch fails.
 
 ## Demo flow
 

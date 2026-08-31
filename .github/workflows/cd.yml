@@ -1,9 +1,9 @@
 name: CD
 
-# Runs the BalkanID gate, then optionally terraform apply for AWS agent resources, then retrigger integration sync.
-# Flow (apply): gate.py → poll approval → terraform apply → syncIntegration (when enabled).
-# Gate-only (PROVISION_AWS_AGENT=false): gate.py only — no AWS/Terraform/sync.
-# PROVISION_AWS_AGENT=true is required for AgentCore harness and Classic agent provisioning (same Terraform stack).
+# Runs the BalkanID gate (or EN-8896 JIT lifecycle), then optionally terraform apply, then syncIntegration.
+# Flow (apply, classic): gate.py → terraform apply (role + harness) → sync
+# Flow (apply, LIFECYCLE_MODE=true): lifecycle.py → terraform apply (harness-only, external role) → sync
+# Flow (destroy, LIFECYCLE_MODE=true): terraform destroy → lifecycle.py delete-identity
 #
 # Configure the agent-lifecycle GitHub environment:
 #   Variables — non-sensitive defaults (see .github/CD_CONFIG.md)
@@ -59,6 +59,15 @@ on:
           - "120"
           - "240"
           - "360"
+      lifecycle_mode:
+        description: EN-8896 JIT identity lifecycle (create role → assign → gate → harness-only TF)
+        required: true
+        default: use-env
+        type: choice
+        options:
+          - use-env
+          - "true"
+          - "false"
       agent_name:
         description: Agent / Terraform resource name (blank = use AGENT_NAME env var)
         required: false
@@ -86,6 +95,9 @@ jobs:
       AGENT_BACKEND: ${{ github.event.inputs.agent_backend == 'use-env' && (vars.AGENT_BACKEND || 'agentcore') || github.event.inputs.agent_backend }}
       TRIGGER_INTEGRATION_SYNC: ${{ github.event.inputs.trigger_integration_sync == 'use-env' && (vars.TRIGGER_INTEGRATION_SYNC || 'true') || github.event.inputs.trigger_integration_sync }}
       AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Agent provisioned via Terraform with BalkanID approval' }}
+      LIFECYCLE_MODE: ${{ github.event.inputs.lifecycle_mode == 'use-env' && (vars.LIFECYCLE_MODE || 'false') || github.event.inputs.lifecycle_mode }}
+      LIFECYCLE_POLICY_NAME: ${{ vars.LIFECYCLE_POLICY_NAME || 'AmazonBedrockFullAccess' }}
+      LIFECYCLE_ROLE_NAME: ${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.LIFECYCLE_ROLE_NAME || vars.AGENT_NAME || 'demo-support-agent' }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       TF_LOG: ERROR
       TF_INPUT: "0"
@@ -110,12 +122,36 @@ jobs:
             terraform/bedrock/.terraform
             terraform/bedrock/terraform.tfstate
             terraform/bedrock/terraform.tfstate.backup
+            .lifecycle_state.json
           key: tfstate-bedrock-${{ env.AGENT_NAME }}-${{ github.ref_name }}
           restore-keys: |
             tfstate-bedrock-${{ env.AGENT_NAME }}-
 
+      - name: Write AWS credentials file
+        if: env.PROVISION_AWS_AGENT == 'true' || env.LIFECYCLE_MODE == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          set +x
+          umask 077
+          printf '%s\n' '[terraform]' "aws_access_key_id = ${AWS_ACCESS_KEY_ID}" "aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}" > /tmp/terraform-aws-credentials
+
+      - name: Resolve AWS account id
+        if: env.PROVISION_AWS_AGENT == 'true' || env.LIFECYCLE_MODE == 'true'
+        id: aws_account
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          set +x
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          echo "account_id=${account_id}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Resolved AWS account (last 4 digits): ***${account_id: -4}"
+
       - name: BalkanID gate
-        if: github.event.inputs.operation == 'apply'
+        if: github.event.inputs.operation == 'apply' && env.LIFECYCLE_MODE != 'true'
         env:
           BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
           BALKANID_AGENT_OWNER_EMAIL: ${{ secrets.BALKANID_AGENT_OWNER_EMAIL || vars.BALKANID_AGENT_OWNER_EMAIL }}
@@ -129,32 +165,46 @@ jobs:
           export POLL_TIMEOUT_SECONDS=$((APPROVAL_WAIT_MINUTES * 60))
           echo "::notice::provision_aws_agent=${PROVISION_AWS_AGENT}"
           echo "::notice::agent_backend=${AGENT_BACKEND}"
+          echo "::notice::lifecycle_mode=${LIFECYCLE_MODE}"
           echo "::notice::Waiting up to ${APPROVAL_WAIT_MINUTES} minutes for approval."
           echo "::notice::Open your tenant → Access Requests while this job runs."
           python3 scripts/gate.py
 
-      - name: Write AWS credentials file
-        if: env.PROVISION_AWS_AGENT == 'true'
+      - name: JIT identity lifecycle (apply)
+        if: github.event.inputs.operation == 'apply' && env.LIFECYCLE_MODE == 'true'
         env:
+          BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
+          BALKANID_AGENT_OWNER_EMAIL: ${{ secrets.BALKANID_AGENT_OWNER_EMAIL || vars.BALKANID_AGENT_OWNER_EMAIL }}
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          INTEGRATION_ID: ${{ secrets.BALKANID_INTEGRATION_ID || vars.BALKANID_INTEGRATION_ID }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: |
-          set +x
-          umask 077
-          printf '%s\n' '[terraform]' "aws_access_key_id = ${AWS_ACCESS_KEY_ID}" "aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}" > /tmp/terraform-aws-credentials
-
-      - name: Resolve AWS account id
-        if: env.PROVISION_AWS_AGENT == 'true'
-        id: aws_account
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCOUNT_ID: ${{ steps.aws_account.outputs.account_id }}
           AWS_REGION: ${{ env.AWS_REGION }}
+          AGENT_TYPE: terraform
+          LIFECYCLE_POLICY_NAME: ${{ env.LIFECYCLE_POLICY_NAME }}
+          LIFECYCLE_ROLE_NAME: ${{ env.LIFECYCLE_ROLE_NAME }}
         run: |
           set +x
-          account_id="$(aws sts get-caller-identity --query Account --output text)"
-          echo "account_id=${account_id}" >> "$GITHUB_OUTPUT"
-          echo "::notice::Resolved AWS account (last 4 digits): ***${account_id: -4}"
+          export POLL_SECONDS=5
+          export POLL_TIMEOUT_SECONDS=$((APPROVAL_WAIT_MINUTES * 60))
+          echo "::notice::lifecycle_mode=true — create service role, assign, agent gate"
+          echo "::notice::Waiting up to ${APPROVAL_WAIT_MINUTES} minutes for approvals."
+          python3 scripts/lifecycle.py apply-all
+
+      - name: Load lifecycle execution role ARN
+        if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT == 'true' && env.LIFECYCLE_MODE == 'true'
+        id: lifecycle_role
+        run: |
+          set +x
+          if [[ ! -f .lifecycle_state.json ]]; then
+            echo "::error::.lifecycle_state.json missing after lifecycle apply"
+            exit 1
+          fi
+          role_arn="$(python3 -c "import json; print(json.load(open('.lifecycle_state.json'))['execution_role_arn'])")"
+          echo "execution_role_arn=${role_arn}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Using BalkanID-provisioned execution role (ARN redacted in logs)"
 
       - name: Terraform init
         if: env.PROVISION_AWS_AGENT == 'true'
@@ -180,9 +230,14 @@ jobs:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
+          TF_VAR_execution_role_arn: ${{ steps.lifecycle_role.outputs.execution_role_arn || '' }}
         run: |
           set +x
-          echo "::notice::Applying AWS agent backend=${AGENT_BACKEND}"
+          if [[ "${LIFECYCLE_MODE}" == "true" ]]; then
+            echo "::notice::Applying AgentCore harness only (external execution role from BalkanID)"
+          else
+            echo "::notice::Applying AWS agent backend=${AGENT_BACKEND}"
+          fi
           terraform apply -auto-approve -input=false -no-color
 
       - name: Trigger integration sync
@@ -203,8 +258,12 @@ jobs:
           python3 trigger_sync.py
 
       - name: Gate-only complete
-        if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT != 'true'
+        if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT != 'true' && env.LIFECYCLE_MODE != 'true'
         run: echo "::notice::Gate approved. PROVISION_AWS_AGENT=false — no AWS resources to apply."
+
+      - name: Lifecycle BalkanID-only complete
+        if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT != 'true' && env.LIFECYCLE_MODE == 'true'
+        run: echo "::notice::JIT lifecycle requests completed. PROVISION_AWS_AGENT=false — no Terraform harness apply."
 
       - name: Terraform destroy
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true'
@@ -215,7 +274,27 @@ jobs:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
-        run: terraform destroy -auto-approve -input=false -no-color
+        run: |
+          set +x
+          if [[ "${LIFECYCLE_MODE}" == "true" && -f "${{ github.workspace }}/.lifecycle_state.json" ]]; then
+            export TF_VAR_execution_role_arn="$(python3 -c "import json; print(json.load(open('${{ github.workspace }}/.lifecycle_state.json'))['execution_role_arn'])")"
+            echo "::notice::Destroying harness (external execution role retained until lifecycle delete step)"
+          fi
+          terraform destroy -auto-approve -input=false -no-color
+
+      - name: JIT identity lifecycle (delete)
+        if: github.event.inputs.operation == 'destroy' && env.LIFECYCLE_MODE == 'true'
+        env:
+          BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          INTEGRATION_ID: ${{ secrets.BALKANID_INTEGRATION_ID || vars.BALKANID_INTEGRATION_ID }}
+          LIFECYCLE_ROLE_NAME: ${{ env.LIFECYCLE_ROLE_NAME }}
+        run: |
+          set +x
+          export POLL_SECONDS=5
+          export POLL_TIMEOUT_SECONDS=$((APPROVAL_WAIT_MINUTES * 60))
+          python3 scripts/lifecycle.py delete-identity
 
       - name: AgentCore memory cleanup
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true' && env.AGENT_BACKEND == 'agentcore'

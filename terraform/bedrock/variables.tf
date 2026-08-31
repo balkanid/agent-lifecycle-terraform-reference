@@ -38,3 +38,9 @@ variable "agent_instruction" {
   type    = string
   default = "You are a demo assistant. Do not perform real actions against production systems."
 }
+
+variable "execution_role_arn" {
+  type        = string
+  description = "When set (EN-8896 JIT mode), skip creating aws_iam_role and attach the harness to this BalkanID-provisioned role ARN."
+  default     = ""
+}

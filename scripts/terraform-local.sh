@@ -48,6 +48,97 @@ cmd="${1:-}"
 shift || true
 
 case "$cmd" in
+  apply-lifecycle)
+    account_id="$(resolve_aws_account_id)"
+    if [[ -z "$account_id" ]]; then
+      echo "AWS_ACCOUNT_ID is required in .env" >&2
+      exit 1
+    fi
+    cred_file="$(mktemp)"
+    trap 'rm -f "$cred_file"' EXIT
+    write_aws_credentials_file "$cred_file"
+
+    echo "==> EN-8896 JIT lifecycle (create role → assign → agent gate)" >&2
+    export AWS_ACCOUNT_ID="$account_id"
+    python3 "$root/scripts/lifecycle.py" apply-all
+
+    state_file="${LIFECYCLE_STATE_FILE:-$root/.lifecycle_state.json}"
+    if [[ ! -f "$state_file" ]]; then
+      echo "missing lifecycle state: $state_file" >&2
+      exit 1
+    fi
+    execution_role_arn="$(python3 -c "import json; print(json.load(open('$state_file'))['execution_role_arn'])")"
+
+    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$backend_lc" == "agentcore" ]]; then
+      echo "==> AgentCore pre-apply reconciliation" >&2
+      "$root/scripts/cleanup-agentcore-before-apply.sh"
+    fi
+
+    echo "==> Terraform Bedrock stack (harness-only, external role)" >&2
+    cd "$root/terraform/bedrock"
+    terraform init -input=false
+    terraform apply -auto-approve \
+      -var="aws_credentials_file=${cred_file}" \
+      -var="aws_account_id=${account_id}" \
+      -var="aws_region=${AWS_REGION:-us-east-1}" \
+      -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
+      -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
+      -var="execution_role_arn=${execution_role_arn}" \
+      "$@"
+
+    trigger_lc="$(printf '%s' "${TRIGGER_INTEGRATION_SYNC:-true}" | tr '[:upper:]' '[:lower:]')"
+    case "$trigger_lc" in
+      0|false|no|off)
+        echo "==> TRIGGER_INTEGRATION_SYNC disabled; skipping sync" >&2
+        exit 0
+        ;;
+    esac
+    if [[ -z "${INTEGRATION_ID:-}" ]]; then
+      echo "==> INTEGRATION_ID not set — skipping post-apply sync" >&2
+      exit 0
+    fi
+    echo "==> Trigger integration sync (integration_id=${INTEGRATION_ID})" >&2
+    python3 "$root/scripts/trigger_sync.py"
+    ;;
+  destroy-lifecycle)
+    account_id="$(resolve_aws_account_id)"
+    if [[ -z "$account_id" ]]; then
+      echo "AWS_ACCOUNT_ID is required in .env" >&2
+      exit 1
+    fi
+    cred_file="$(mktemp)"
+    trap 'rm -f "$cred_file"' EXIT
+    write_aws_credentials_file "$cred_file"
+
+    state_file="${LIFECYCLE_STATE_FILE:-$root/.lifecycle_state.json}"
+    extra_tf_vars=()
+    if [[ -f "$state_file" ]]; then
+      execution_role_arn="$(python3 -c "import json; print(json.load(open('$state_file'))['execution_role_arn'])")"
+      extra_tf_vars=(-var="execution_role_arn=${execution_role_arn}")
+    fi
+
+    echo "==> Terraform destroy (harness only)" >&2
+    cd "$root/terraform/bedrock"
+    terraform init -input=false
+    terraform destroy -auto-approve \
+      -var="aws_credentials_file=${cred_file}" \
+      -var="aws_account_id=${account_id}" \
+      -var="aws_region=${AWS_REGION:-us-east-1}" \
+      -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
+      -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
+      "${extra_tf_vars[@]}" \
+      "$@"
+
+    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$backend_lc" == "agentcore" ]]; then
+      echo "==> AgentCore memory cleanup" >&2
+      "$root/scripts/cleanup-agentcore-memory.sh"
+    fi
+
+    echo "==> DELETE_SERVICE_ACCOUNT (deprovision BalkanID-managed role)" >&2
+    python3 "$root/scripts/lifecycle.py" delete-identity
+    ;;
   apply-bedrock)
     account_id="$(resolve_aws_account_id)"
     if [[ -z "$account_id" ]]; then
@@ -148,7 +239,7 @@ case "$cmd" in
     exec "$root/scripts/cleanup-agentcore-before-apply.sh" "$@"
     ;;
   *)
-    echo "Usage: $0 {apply-bedrock|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-before-apply}" >&2
+    echo "Usage: $0 {apply-bedrock|apply-lifecycle|destroy-lifecycle|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-before-apply}" >&2
     exit 1
     ;;
 esac
