@@ -23,28 +23,31 @@ When the same name exists as both secret and variable, the workflow uses the **s
 
 | Name | Required | Default | Description |
 |---|---|---|---|
-| `PROVISION_AWS_AGENT` | No | `false` | **`true`** to provision an AWS agent (AgentCore harness or Classic agent) after gate approval. `false` = gate-only. |
+| `PROVISION_AWS_AGENT` | No | `false` | **`true`** to provision an AWS agent (AgentCore harness or Classic agent) after gates. `false` = gates only. |
+| `SERVICE_ACCOUNT_GATE` | No | `false` | **`true`** to run `CREATE_SERVICE_ACCOUNT` approval gate before the agent gate. |
+| `AGENT_GATE` | No | `true` | **`true`** to run `AGENT_ACCESS` approval gate (`gate.py`). |
+| `POLL_SECONDS` | No | `5` | Seconds between approval status polls. |
 | `AGENT_BACKEND` | No | `agentcore` | When `PROVISION_AWS_AGENT=true`: `agentcore` (new accounts) or `classic` (allowlisted Classic accounts). |
 | `TRIGGER_INTEGRATION_SYNC` | No | `true` | After successful Terraform apply, call Public API `syncIntegration` |
 | `BALKANID_PUBLIC_API_URL` | Yes (or secret) | — | Public API base URL, e.g. `https://your-tenant.balkanid.app/api/public` |
 | `BALKANID_AGENT_OWNER_EMAIL` | Yes (or secret) | — | Employee who will own the agent |
 | `BALKANID_INTEGRATION_ID` | When sync enabled (or secret) | *(empty)* | AWS integration id |
-| `APPROVAL_WAIT_MINUTES` | No | `120` | Max minutes the gate polls before failing (no AWS resources created) |
+| `APPROVAL_WAIT_MINUTES` | No | `120` | Max minutes each gate polls before failing (no AWS resources created) |
 | `AGENT_NAME` | No | `demo-support-agent` | Agent / Terraform resource name |
 | `AGENT_PURPOSE` | No | `Agent provisioned via Terraform with BalkanID approval` | Purpose string passed as `createRequest.reason` |
+| `SERVICE_ACCOUNT_POLICY_NAME` | When `SERVICE_ACCOUNT_GATE=true` | `AmazonBedrockFullAccess` | Managed policy name for policy review on create request |
+| `SERVICE_ACCOUNT_ROLE_NAME` | No | same as `AGENT_NAME` | IAM service role name Terraform will create |
 | `AWS_REGION` | No | `us-east-1` | AWS region when `PROVISION_AWS_AGENT=true` |
-| `LIFECYCLE_MODE` | No | `false` | **`true`** for EN-8896: approval gates (create role + agent access), then Terraform provisions AWS |
-| `LIFECYCLE_POLICY_NAME` | When `LIFECYCLE_MODE=true` | `AmazonBedrockFullAccess` | Managed policy name for policy review (grants on CREATE request scimPayload) |
-| `LIFECYCLE_ROLE_NAME` | No | same as `AGENT_NAME` | IAM service role name Terraform will create |
+| `AWS_ACCOUNT_ID` | Optional | — | Used for intended IAM role ARN on gates when AWS secrets are not set |
 
-Account id for Terraform IAM trust policies is resolved at runtime via `aws sts get-caller-identity`. Local runs can set `AWS_ACCOUNT_ID` in `.env` — see `scripts/terraform-local.sh`.
+Account id for Terraform IAM trust policies is resolved at runtime via `aws sts get-caller-identity` when AWS secrets are configured. Local runs can set `AWS_ACCOUNT_ID` in `.env` — see `scripts/terraform-local.sh`.
 
 ### Why secret vs variable?
 
 | Treat as **secret** | Treat as **variable** |
 |---|---|
 | API key id/secret | `PROVISION_AWS_AGENT`, `AGENT_BACKEND`, region |
-| AWS access keys | Agent name, purpose, timeouts |
+| AWS access keys | Agent name, purpose, timeouts, poll interval |
 | Tenant URL, employee email, integration id (recommended) | Non-identifying workflow toggles |
 
 Employee email and integration id can be variables for convenience; use **secrets** if you want them masked in workflow logs. See [SECURITY.md](../SECURITY.md).
@@ -57,47 +60,46 @@ When you **Run workflow**, dropdowns default to **`use-env`** (read from environ
 |---|---|---|
 | `operation` | dropdown | — (always per run) |
 | `provision_aws_agent` | dropdown (`use-env` / `true` / `false`) | `PROVISION_AWS_AGENT` |
+| `service_account_gate` | dropdown (`use-env` / `true` / `false`) | `SERVICE_ACCOUNT_GATE` |
+| `agent_gate` | dropdown (`use-env` / `true` / `false`) | `AGENT_GATE` |
 | `agent_backend` | dropdown (`use-env` / `agentcore` / `classic`) | `AGENT_BACKEND` |
 | `trigger_integration_sync` | dropdown (`use-env` / `true` / `false`) | `TRIGGER_INTEGRATION_SYNC` |
 | `approval_wait_minutes` | dropdown (`use-env` / 30 / 60 / 120 / 240 / 360) | `APPROVAL_WAIT_MINUTES` |
-| `lifecycle_mode` | dropdown (`use-env` / `true` / `false`) | `LIFECYCLE_MODE` |
+| `poll_seconds` | dropdown (`use-env` / 5 / 10 / 15 / 30 / 60) | `POLL_SECONDS` |
 | `agent_name` | text (optional) | `AGENT_NAME` |
 
 ## End-to-end apply flow (`PROVISION_AWS_AGENT=true`)
 
-**Classic (EN-8866, `LIFECYCLE_MODE=false`):**
+**Agent gate only (default):**
 
 ```
 CD run (apply)
-  1. gate.py          → createRequest (AGENT_ACCESS) + poll until approved/denied
-  2. if denied        → job fails (no AWS resources)
-  3. if approved      → terraform apply (role + harness/agent)
-  4. if sync enabled  → syncIntegration(integrationId)
+  1. gate.py           → AGENT_ACCESS + poll until approved/denied
+  2. terraform apply   → IAM role + harness/agent
+  3. syncIntegration
 ```
 
-**Identity lifecycle (EN-8896, `LIFECYCLE_MODE=true`):**
+**Service account + agent gates:**
 
 ```
 CD run (apply)
-  1. lifecycle.py apply-all
-       → CREATE_SERVICE_ACCOUNT (approval only; grants in scimPayload for policy review)
-       → AGENT_ACCESS (approval only)
-  2. terraform apply  → IAM role + inline policy + AgentCore harness (or Classic agent)
-  3. syncIntegration  → discover resources in BalkanID
+  1. service_account_gate.py → CREATE_SERVICE_ACCOUNT (approval only)
+  2. gate.py                 → AGENT_ACCESS (approval only)
+  3. terraform apply         → IAM role + harness/agent
+  4. syncIntegration
 ```
 
-Teardown is the same as classic mode: `destroy` runs `terraform destroy` (role + harness). No BalkanID provisioner wait, and no separate DELETE request.
+Gates wait for **approval only** — Terraform provisions AWS resources. Disable app provisioning on the demo AWS integration if you do not want the BalkanID provisioner to create IAM resources in parallel.
 
-Disable app provisioning on the demo AWS integration if you do not want the BalkanID provisioner to also create IAM resources in parallel with Terraform.
+Set `BALKANID_INTEGRATION_ID` to your AWS integration in BalkanID. Disable sync with `TRIGGER_INTEGRATION_SYNC=false`.
 
 ## Demo flow
 
-1. Set variables: `PROVISION_AWS_AGENT=false`, plus BalkanID URL, employee email, and integration id.
-2. Set secrets: API key id + secret.
+1. Set variables: `SERVICE_ACCOUNT_GATE=true`, `AGENT_GATE=true`, `PROVISION_AWS_AGENT=true`, plus BalkanID URL, employee email, and integration id.
+2. Set secrets: API key id + secret, AWS credentials.
 3. Actions → **CD** → Run workflow → `apply`.
-4. Approve or deny in BalkanID while the job waits.
-5. To provision AWS agents: set `PROVISION_AWS_AGENT=true`, `BALKANID_INTEGRATION_ID`, add AWS secrets, run `apply` again.
-6. Run `destroy` to tear down AWS resources (uses cached Terraform state). When `AGENT_BACKEND=agentcore`, CD also runs memory cleanup for orphan AgentCore resources.
+4. Approve each request in BalkanID while the job waits.
+5. Run `destroy` to tear down AWS resources (uses cached Terraform state). When `AGENT_BACKEND=agentcore`, CD also runs harness + memory cleanup for AgentCore resources Terraform may leave behind.
 
 Bedrock and AgentCore must be enabled in your chosen region when `PROVISION_AWS_AGENT=true`. Default **`AGENT_BACKEND=agentcore`** works on new AWS accounts.
 

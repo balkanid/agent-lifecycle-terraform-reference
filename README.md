@@ -30,8 +30,9 @@ When approval completes, BalkanID can also notify your automation via the **`req
 
 ```
 ├── scripts/gate.py          # createRequest (AGENT_ACCESS) + poll until terminal status
-├── scripts/lifecycle.py     # EN-8896 JIT identity lifecycle orchestrator
-├── scripts/balkanid_api.py  # Shared Public API helpers
+├── scripts/gate.py                  # Agent access gate (AGENT_ACCESS)
+├── scripts/service_account_gate.py  # Service account gate (CREATE_SERVICE_ACCOUNT)
+├── scripts/balkanid_api.py          # Shared Public API helpers
 ├── scripts/trigger_sync.py  # syncIntegration after AWS resources are created
 ├── terraform/               # Gate-only stack (local-exec) + optional Bedrock module
 ├── aws/                     # Example least-privilege IAM policy for Terraform
@@ -108,13 +109,15 @@ Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your a
 
 When `TRIGGER_INTEGRATION_SYNC=true` and `INTEGRATION_ID` is set, `apply-bedrock` runs gate → Terraform → `syncIntegration`.
 
-### Identity lifecycle (EN-8896)
+### Two-gate flow (service account + agent)
 
-Approval gates for service-role create and agent access; **Terraform provisions all AWS resources** after approvals (no waiting on BalkanID provisioner):
+Approval gates for service-role create and agent access; **Terraform provisions all AWS resources** after approvals:
 
 ```bash
 ./scripts/terraform-local.sh apply-lifecycle
 ```
+
+This runs `service_account_gate.py` then `gate.py`, then Terraform.
 
 Teardown:
 
@@ -122,7 +125,7 @@ Teardown:
 ./scripts/terraform-local.sh destroy-lifecycle
 ```
 
-In GitHub CD, set `LIFECYCLE_MODE=true` with `PROVISION_AWS_AGENT=true`. See [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md).
+In GitHub CD, set `SERVICE_ACCOUNT_GATE=true` and `AGENT_GATE=true` with `PROVISION_AWS_AGENT=true`. Configure `POLL_SECONDS` for poll interval (default 5). See [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md).
 
 ### Teardown and re-runs (AgentCore)
 
@@ -193,10 +196,9 @@ Attach [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecyc
 
 | API | Role in this reference |
 |---|---|
-| **`createRequest` (`AGENT_ACCESS`)** | Agent access gate. Called by `scripts/gate.py` (classic) or `scripts/lifecycle.py` (lifecycle mode). |
-| **`createRequest` (`CREATE_SERVICE_ACCOUNT`)** | Lifecycle mode: approval gate for service role create (Terraform provisions after approval). |
-| **`createRequest` (`SERVICE_ACCOUNT_ASSIGNMENT`)** | Optional lifecycle gate when `LIFECYCLE_INCLUDE_ASSIGN_REQUEST=true` and identity id is known. |
-| **`requests` query** | Polls request status until approved or denied (approval only — no provisioner wait). |
+| **`createRequest` (`AGENT_ACCESS`)** | Agent access gate (`scripts/gate.py`). |
+| **`createRequest` (`CREATE_SERVICE_ACCOUNT`)** | Service account gate (`scripts/service_account_gate.py`). |
+| **`requests` query** | Polls request status until approved or denied (approval only). |
 | **`syncIntegration`** | Triggers integration sync so BalkanID discovers AWS resources after Terraform creates them. |
 
 The gate sends structured intent: owner email, `CREATE` action, agent name, agent type, and optional integration id and intended IAM role ARN. BalkanID stores the request; the agent entity appears after external provisioning and integration sync.

@@ -32,7 +32,7 @@ jobs:
           python-version: "3.12"
 
       - name: Compile gate scripts
-        run: python3 -m py_compile scripts/gate.py scripts/trigger_sync.py
+        run: python3 -m py_compile scripts/gate.py scripts/service_account_gate.py scripts/balkanid_api.py scripts/trigger_sync.py
 
       - name: Block tracked secret files
         run: |

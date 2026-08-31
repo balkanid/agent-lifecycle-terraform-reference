@@ -58,9 +58,12 @@ case "$cmd" in
     trap 'rm -f "$cred_file"' EXIT
     write_aws_credentials_file "$cred_file"
 
-    echo "==> EN-8896 lifecycle gates (approval only — Terraform provisions AWS)" >&2
+    echo "==> Service account gate" >&2
     export AWS_ACCOUNT_ID="$account_id"
-    python3 "$root/scripts/lifecycle.py" apply-all
+    python3 "$root/scripts/service_account_gate.py"
+
+    echo "==> Agent access gate" >&2
+    python3 "$root/scripts/gate.py"
 
     backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
     if [[ "$backend_lc" == "agentcore" ]]; then
@@ -118,11 +121,6 @@ case "$cmd" in
     if [[ "$backend_lc" == "agentcore" ]]; then
       echo "==> AgentCore memory cleanup" >&2
       "$root/scripts/cleanup-agentcore-memory.sh"
-    fi
-
-    state_file="${LIFECYCLE_STATE_FILE:-$root/.lifecycle_state.json}"
-    if [[ -f "$state_file" ]]; then
-      rm -f "$state_file"
     fi
     ;;
   apply-bedrock)

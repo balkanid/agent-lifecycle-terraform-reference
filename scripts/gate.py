@@ -8,196 +8,49 @@ Requires env vars from env.example. No third-party packages.
 from __future__ import annotations
 
 import json
-import os
 import sys
-import time
-import urllib.error
-import urllib.request
 
-CREATE = """
-mutation CreateAgentAccessRequest($input: CreateRequestInput!) {
-  createRequest(input: $input) {
-    id
-    success
-    eventIds
-    stepUpRequired
-  }
-}
-"""
-
-GET = """
-query RequestStatus($filter: RequestFilterInput, $first: Int) {
-  requests(filter: $filter, first: $first) {
-    edges {
-      node {
-        id
-        status
-        requestApprovalStatus
-        requestProvisioningStatus
-        requestType
-      }
-    }
-  }
-}
-"""
-
-APPROVED = {
-    "approved",
-    "completed",
-    "provisioned",
-    "partially_approved",
-    "partially approved",
-}
-DENIED = {
-    "denied",
-    "rejected",
-    "cancelled",
-    "canceled",
-    "failed",
-}
-
-USER_AGENT = (
-    "balkanid-agent-lifecycle-reference/1.0 "
-    "(+https://github.com/balkanid/agent-lifecycle-terraform-reference)"
+from balkanid_api import (
+    api_client_from_env,
+    ci_mode,
+    create_request,
+    env_optional,
+    load_dotenv,
+    log_stderr,
+    poll_request,
+    poll_settings,
+    redact_identifier,
 )
 
-
-def ci_mode() -> bool:
-    return os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or os.environ.get("CI", "").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+ROLE_PATH_PREFIX = "/balkanid-agent-lifecycle/"
 
 
-def log_stderr(message: str) -> None:
-    print(message, file=sys.stderr)
-
-
-def redact_identifier(value: str, visible: int = 4) -> str:
-    value = value.strip()
-    if not value:
-        return "(empty)"
-    if len(value) <= visible:
-        return "***"
-    return f"***{value[-visible:]}"
-
-
-def load_dotenv() -> None:
-    """Load repo-root .env when vars are not already exported (local dev convenience)."""
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(root, ".env")
-    if not os.path.isfile(path):
-        return
-    with open(path, encoding="utf-8") as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                value = value[1:-1]
-            if key:
-                os.environ[key] = value
-
-
-def http_error_message(code: int, detail: str, url: str = "") -> str:
-    lower = detail.lower()
-    if code == 403 and "<html" in lower:
-        return (
-            f"HTTP 403: request blocked or denied{url and f' ({url})' or ''}. "
-            "Verify BALKANID_PUBLIC_API_URL, API key id/secret, and that your "
-            "API key has Public API access."
-        )
-    if "<html" in lower:
-        return (
-            f"HTTP {code}: non-JSON response from public API "
-            "(body looks like HTML; check BALKANID_PUBLIC_API_URL and credentials)"
-        )
-    if code == 404:
-        hint = (
-            " Public API is served at your tenant URL "
-            "(e.g. https://your-tenant.balkanid.app/api/public). "
-            "If .env is correct, your shell may still export a stale "
-            "BALKANID_PUBLIC_API_URL — run `echo $BALKANID_PUBLIC_API_URL` "
-            "or rely on gate.py loading .env automatically."
-        )
-        return f"HTTP 404 from public API: {detail.strip()}.{hint}"
-    if len(detail) > 800:
-        detail = detail[:800] + "..."
-    return f"HTTP {code} from public API: {detail}"
-
-
-def env(name: str, default: str | None = None) -> str:
-    val = os.environ.get(name, default)
-    if val is None or val.strip() == "":
-        raise SystemExit(f"missing required env {name}")
-    return val.strip()
-
-
-def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict:
-    body = json.dumps({"query": query, "variables": variables}).encode()
-    req = urllib.request.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": USER_AGENT,
-            "X-Api-Key-Id": key_id,
-            "X-Api-Key-Secret": secret,
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            payload = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as err:
-        detail = err.read().decode() if err.fp else ""
-        raise SystemExit(http_error_message(err.code, detail, url)) from err
-    if payload.get("errors"):
-        if ci_mode():
-            raise SystemExit("GraphQL request failed (error details suppressed in CI logs)")
-        raise SystemExit(json.dumps(payload["errors"], indent=2))
-    data = payload.get("data")
-    if not data:
-        raise SystemExit(f"empty GraphQL data: {payload}")
-    return data
-
-
-def terminal(status: str | None, approval: str | None) -> str | None:
-    for raw in (status, approval):
-        if not raw:
-            continue
-        n = raw.strip().lower().replace("-", "_").replace(" ", "_")
-        if n in APPROVED or "approv" in n and "pending" not in n and "await" not in n:
-            if n in DENIED:
-                return "denied"
-            if n in APPROVED or n.endswith("approved"):
-                return "approved"
-        if n in DENIED or "denied" in n or "reject" in n:
-            return "denied"
-    return None
+def expected_role_arn(agent_name: str) -> str:
+    override = env_optional("INTENDED_IAM_ROLE_ARN")
+    if override:
+        return override
+    aws_account_id = env_optional("AWS_ACCOUNT_ID")
+    role_name = env_optional("SERVICE_ACCOUNT_ROLE_NAME") or agent_name
+    if aws_account_id:
+        return f"arn:aws:iam::{aws_account_id}:role{ROLE_PATH_PREFIX}{role_name}"
+    return ""
 
 
 def main() -> int:
     load_dotenv()
-    url = env("BALKANID_PUBLIC_API_URL")
-    key_id = env("API_KEY_ID")
-    secret = env("API_KEY_SECRET")
-    owner = env("BALKANID_AGENT_OWNER_EMAIL")
-    agent = os.environ.get("AGENT_NAME", "demo-support-agent").strip()
-    agent_type = os.environ.get("AGENT_TYPE", "terraform").strip()
-    integration = os.environ.get("INTEGRATION_ID", "").strip()
-    purpose = os.environ.get("AGENT_PURPOSE", "Agent provisioned via Terraform with BalkanID approval").strip()
-    role_arn = os.environ.get("INTENDED_IAM_ROLE_ARN", "").strip()
-    poll_s = int(os.environ.get("POLL_SECONDS", "5"))
-    timeout_s = int(os.environ.get("POLL_TIMEOUT_SECONDS", "900"))
+    url, key_id, secret = api_client_from_env()
+    owner = env_optional("BALKANID_AGENT_OWNER_EMAIL")
+    if not owner:
+        raise SystemExit("missing required env BALKANID_AGENT_OWNER_EMAIL")
 
-    reason = purpose
-    if not reason:
-        reason = f"Terraform gate for agent {agent}"
+    agent = env_optional("AGENT_NAME", "demo-support-agent")
+    agent_type = env_optional("AGENT_TYPE", "terraform")
+    integration = env_optional("INTEGRATION_ID")
+    purpose = env_optional("AGENT_PURPOSE", "Agent provisioned via Terraform with BalkanID approval")
+    role_arn = expected_role_arn(agent)
+    poll_s, timeout_s = poll_settings()
+
+    reason = purpose or f"Terraform gate for agent {agent}"
 
     if ci_mode():
         log_stderr("public API url=(redacted in CI)")
@@ -224,46 +77,28 @@ def main() -> int:
         "payload": {"agentAccess": agent_access},
     }
 
-    created = gql(url, key_id, secret, CREATE, {"input": inp})["createRequest"]
-
-    if created.get("stepUpRequired"):
-        raise SystemExit("step-up MFA required on createRequest; complete MFA and retry")
-    if not created.get("success") or not created.get("id"):
-        if ci_mode():
-            raise SystemExit("createRequest failed (details suppressed in CI logs)")
-        raise SystemExit(f"createRequest failed: {created}")
-
-    request_id = created["id"]
+    request_id = create_request(url, key_id, secret, inp)
     log_stderr(f"request_id={request_id}")
-    log_stderr("waiting for approval in BalkanID (fail closed on deny/timeout)")
+    log_stderr("waiting for approval (fail closed on deny/timeout)")
 
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        listed = gql(
+    try:
+        poll_request(
             url,
             key_id,
             secret,
-            GET,
-            {"filter": {"id": {"_eq": request_id}}, "first": 1},
+            request_id,
+            wait_provisioning=False,
+            poll_s=poll_s,
+            timeout_s=timeout_s,
+            label="AGENT_ACCESS",
         )
-        edges = (listed.get("requests") or {}).get("edges") or []
-        node = (edges[0] or {}).get("node") if edges else None
-        if node:
-            status = node.get("status")
-            approval = node.get("requestApprovalStatus")
-            req_type = node.get("requestType")
-            log_stderr(f"status={status!r} approval={approval!r} requestType={req_type!r}")
-            outcome = terminal(status, approval)
-            if outcome == "approved":
-                print(json.dumps({"request_id": request_id, "status": "approved"}))
-                return 0
-            if outcome == "denied":
-                print(json.dumps({"request_id": request_id, "status": "denied"}), file=sys.stderr)
-                return 1
-        time.sleep(poll_s)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        print(json.dumps({"request_id": request_id, "status": "denied" if code == 1 else "failed"}), file=sys.stderr)
+        return code or 1
 
-    log_stderr(f"timed out after {timeout_s}s waiting on {request_id}")
-    return 1
+    print(json.dumps({"request_id": request_id, "status": "approved"}))
+    return 0
 
 
 if __name__ == "__main__":

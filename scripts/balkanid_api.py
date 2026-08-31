@@ -152,25 +152,64 @@ def api_client_from_env() -> tuple[str, str, str]:
     return env("BALKANID_PUBLIC_API_URL"), env("API_KEY_ID"), env("API_KEY_SECRET")
 
 
+def poll_settings() -> tuple[int, int]:
+    poll_s = int(env_optional("POLL_SECONDS", "5"))
+    timeout_raw = os.environ.get("POLL_TIMEOUT_SECONDS")
+    if timeout_raw and timeout_raw.strip():
+        timeout_s = int(timeout_raw)
+    else:
+        wait_min = env_optional("APPROVAL_WAIT_MINUTES")
+        timeout_s = int(wait_min) * 60 if wait_min else 900
+    return poll_s, timeout_s
+
+
+TRANSIENT_HTTP_CODES = frozenset({429, 502, 503, 504, 520})
+
+
 def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict:
     body = json.dumps({"query": query, "variables": variables}).encode()
-    req = urllib.request.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": USER_AGENT,
-            "X-Api-Key-Id": key_id,
-            "X-Api-Key-Secret": secret,
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            payload = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as err:
-        detail = err.read().decode() if err.fp else ""
-        raise SystemExit(http_error_message(err.code, detail, url)) from err
+    max_attempts = int(env_optional("GQL_MAX_RETRIES", "5"))
+    backoff_s = float(env_optional("GQL_RETRY_BACKOFF_SECONDS", "2"))
+
+    last_err: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": USER_AGENT,
+                "X-Api-Key-Id": key_id,
+                "X-Api-Key-Secret": secret,
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                payload = json.loads(resp.read().decode())
+            last_err = None
+            break
+        except urllib.error.HTTPError as err:
+            detail = err.read().decode() if err.fp else ""
+            if err.code in TRANSIENT_HTTP_CODES and attempt < max_attempts:
+                log_stderr(
+                    f"transient HTTP {err.code} from public API (attempt {attempt}/{max_attempts}); retrying"
+                )
+                time.sleep(backoff_s * attempt)
+                last_err = err
+                continue
+            raise SystemExit(http_error_message(err.code, detail, url)) from err
+        except urllib.error.URLError as err:
+            if attempt < max_attempts:
+                log_stderr(f"public API unreachable (attempt {attempt}/{max_attempts}); retrying")
+                time.sleep(backoff_s * attempt)
+                last_err = err
+                continue
+            raise SystemExit(f"public API request failed: {err}") from err
+
+    if last_err is not None:
+        raise SystemExit(f"public API request failed after {max_attempts} attempts: {last_err}")
+
     if payload.get("errors"):
         if ci_mode():
             raise SystemExit("GraphQL request failed (error details suppressed in CI logs)")
