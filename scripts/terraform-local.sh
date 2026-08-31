@@ -144,8 +144,8 @@ case "$cmd" in
 
     backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
     if [[ "$backend_lc" == "agentcore" ]]; then
-      echo "==> AgentCore post-destroy cleanup (harness + memory)" >&2
-      "$root/scripts/cleanup-agentcore-on-destroy.sh"
+      echo "==> AgentCore memory cleanup" >&2
+      "$root/scripts/cleanup-agentcore-memory.sh"
     fi
     ;;
   cleanup-agentcore-on-destroy)

@@ -94,13 +94,25 @@ for h in json.load(sys.stdin).get('harnesses') or []:
 
   while read -r harness_id status; do
     [[ -z "$harness_id" ]] && continue
+    if [[ "$status" == "DELETING" ]]; then
+      echo "Harness ${harness_id} (${harness_name}) is already DELETING — skipping."
+      continue
+    fi
     echo "Deleting harness ${harness_id} (${harness_name}, status=${status})."
-    if ! aws_cli bedrock-agentcore-control delete-harness \
+    delete_err=""
+    delete_rc=0
+    delete_err="$(aws_cli bedrock-agentcore-control delete-harness \
       --harness-id "$harness_id" \
       --region "$region" \
-      --no-cli-pager; then
-      echo "warning: delete-harness ${harness_id} failed — continuing" >&2
+      --no-cli-pager 2>&1)" || delete_rc=$?
+    if [[ "$delete_rc" -eq 0 ]]; then
+      continue
     fi
+    if echo "$delete_err" | grep -qiE 'DELETING|ConflictException'; then
+      echo "warning: harness ${harness_id} already deleting — continuing" >&2
+      continue
+    fi
+    echo "warning: delete-harness ${harness_id} failed — continuing" >&2
   done <<< "$matches"
 }
 
