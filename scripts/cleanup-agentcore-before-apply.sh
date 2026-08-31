@@ -58,6 +58,7 @@ state_has() {
 iam_role_policy_resource() {
   local role_resource="$1"
   case "$role_resource" in
+    'aws_iam_role.execution[0]') echo 'aws_iam_role_policy.invoke[0]' ;;
     'aws_iam_role.agentcore[0]') echo 'aws_iam_role_policy.agentcore_invoke[0]' ;;
     'aws_iam_role.bedrock_classic[0]') echo 'aws_iam_role_policy.bedrock_classic_invoke[0]' ;;
     *) echo "" ;;
@@ -220,12 +221,7 @@ echo "==> AgentCore pre-apply reconciliation (agent=${agent_name}, region=${regi
 
 delete_harness_if_orphan_or_failed
 
-backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
-if [[ "$backend_lc" == "agentcore" ]]; then
-  role_resource="aws_iam_role.agentcore[0]"
-else
-  role_resource="aws_iam_role.bedrock_classic[0]"
-fi
+role_resource="aws_iam_role.execution[0]"
 
 if [[ "$harness_in_state" == true ]]; then
   reconcile_iam_role "$role_resource"

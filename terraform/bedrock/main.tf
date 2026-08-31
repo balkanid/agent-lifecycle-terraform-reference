@@ -7,15 +7,37 @@ locals {
   harness_name = replace(var.agent_name, "-", "_")
 }
 
-resource "aws_iam_role" "bedrock_classic" {
-  count = local.use_classic ? 1 : 0
+# Single IAM role for both backends — trust/policy update in place when switching
+# agent_backend, avoiding EntityAlreadyExists on the shared role name.
+moved {
+  from = aws_iam_role.agentcore
+  to   = aws_iam_role.execution
+}
+
+moved {
+  from = aws_iam_role.bedrock_classic
+  to   = aws_iam_role.execution
+}
+
+moved {
+  from = aws_iam_role_policy.agentcore_invoke
+  to   = aws_iam_role_policy.invoke
+}
+
+moved {
+  from = aws_iam_role_policy.bedrock_classic_invoke
+  to   = aws_iam_role_policy.invoke
+}
+
+resource "aws_iam_role" "execution" {
+  count = 1
   name  = local.role_name
   path  = local.role_path
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
+      local.use_classic ? {
         Effect = "Allow"
         Principal = {
           Service = "bedrock.amazonaws.com"
@@ -26,48 +48,7 @@ resource "aws_iam_role" "bedrock_classic" {
             "aws:SourceAccount" = var.aws_account_id
           }
         }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy" "bedrock_classic_invoke" {
-  count = local.use_classic ? 1 : 0
-  name  = "invoke-foundation-model"
-  role  = aws_iam_role.bedrock_classic[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-resource "aws_bedrockagent_agent" "this" {
-  count                       = local.use_classic ? 1 : 0
-  agent_name                  = var.agent_name
-  agent_resource_role_arn     = aws_iam_role.bedrock_classic[0].arn
-  foundation_model            = var.foundation_model
-  instruction                 = var.agent_instruction
-  idle_session_ttl_in_seconds = 600
-
-  depends_on = [aws_iam_role_policy.bedrock_classic_invoke]
-}
-
-resource "aws_iam_role" "agentcore" {
-  count = local.use_agentcore ? 1 : 0
-  name  = local.role_name
-  path  = local.role_path
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
+      } : {
         Effect = "Allow"
         Principal = {
           Service = "bedrock-agentcore.amazonaws.com"
@@ -86,14 +67,20 @@ resource "aws_iam_role" "agentcore" {
   })
 }
 
-resource "aws_iam_role_policy" "agentcore_invoke" {
-  count = local.use_agentcore ? 1 : 0
+resource "aws_iam_role_policy" "invoke" {
+  count = 1
   name  = "invoke-foundation-model"
-  role  = aws_iam_role.agentcore[0].id
+  role  = aws_iam_role.execution[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = local.use_classic ? [
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+        Resource = "*"
+      }
+    ] : [
       {
         Effect = "Allow"
         Action = [
@@ -117,10 +104,21 @@ resource "aws_iam_role_policy" "agentcore_invoke" {
   })
 }
 
+resource "aws_bedrockagent_agent" "this" {
+  count                       = local.use_classic ? 1 : 0
+  agent_name                  = var.agent_name
+  agent_resource_role_arn     = aws_iam_role.execution[0].arn
+  foundation_model            = var.foundation_model
+  instruction                 = var.agent_instruction
+  idle_session_ttl_in_seconds = 600
+
+  depends_on = [aws_iam_role_policy.invoke]
+}
+
 resource "aws_bedrockagentcore_harness" "this" {
   count              = local.use_agentcore ? 1 : 0
   harness_name       = local.harness_name
-  execution_role_arn = aws_iam_role.agentcore[0].arn
+  execution_role_arn = aws_iam_role.execution[0].arn
 
   model {
     bedrock_model_config {
@@ -132,5 +130,5 @@ resource "aws_bedrockagentcore_harness" "this" {
     text = var.agent_instruction
   }
 
-  depends_on = [aws_iam_role_policy.agentcore_invoke]
+  depends_on = [aws_iam_role_policy.invoke]
 }
