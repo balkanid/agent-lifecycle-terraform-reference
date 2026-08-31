@@ -115,13 +115,10 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
-      "$@"
+      "$@" || echo "warning: terraform destroy exited non-zero — running AWS sweep" >&2
 
-    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$backend_lc" == "agentcore" ]]; then
-      echo "==> AgentCore memory cleanup" >&2
-      "$root/scripts/cleanup-agentcore-memory.sh"
-    fi
+    echo "==> AWS resource sweep after destroy" >&2
+    "$root/scripts/cleanup-after-destroy.sh"
     ;;
   apply-bedrock)
     account_id="$(resolve_aws_account_id)"
@@ -208,13 +205,10 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
-      "$@"
+      "$@" || echo "warning: terraform destroy exited non-zero — running AWS sweep" >&2
 
-    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$backend_lc" == "agentcore" ]]; then
-      echo "==> AgentCore memory cleanup (orphans after harness destroy)" >&2
-      "$root/scripts/cleanup-agentcore-memory.sh"
-    fi
+    echo "==> AWS resource sweep after destroy" >&2
+    "$root/scripts/cleanup-after-destroy.sh"
     ;;
   cleanup-agentcore-memory)
     exec "$root/scripts/cleanup-agentcore-memory.sh" "$@"
@@ -222,8 +216,11 @@ case "$cmd" in
   cleanup-agentcore-before-apply)
     exec "$root/scripts/cleanup-agentcore-before-apply.sh" "$@"
     ;;
+  cleanup-after-destroy)
+    exec "$root/scripts/cleanup-after-destroy.sh" "$@"
+    ;;
   *)
-    echo "Usage: $0 {apply-bedrock|apply-lifecycle|destroy-lifecycle|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-before-apply}" >&2
+    echo "Usage: $0 {apply-bedrock|apply-lifecycle|destroy-lifecycle|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-before-apply|cleanup-after-destroy}" >&2
     exit 1
     ;;
 esac

@@ -283,6 +283,7 @@ jobs:
         run: echo "::notice::Gates approved. PROVISION_AWS_AGENT=false — no AWS resources to apply."
 
       - name: Terraform destroy
+        id: terraform_destroy
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true'
         working-directory: terraform/bedrock
         env:
@@ -293,14 +294,14 @@ jobs:
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
         run: terraform destroy -auto-approve -input=false -no-color
 
-      - name: AgentCore memory cleanup
-        if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true' && env.AGENT_BACKEND == 'agentcore'
+      - name: AWS resource sweep after destroy
+        if: always() && github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.AWS_REGION }}
           AGENT_NAME: ${{ env.AGENT_NAME }}
-        run: bash scripts/cleanup-agentcore-memory.sh
+        run: bash scripts/cleanup-after-destroy.sh
 
       - name: Destroy skipped (gate-only)
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT != 'true'
