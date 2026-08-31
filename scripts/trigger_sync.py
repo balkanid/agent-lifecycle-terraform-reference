@@ -2,17 +2,23 @@
 """Trigger a BalkanID integration sync via Public API syncIntegration.
 
 Run after Terraform creates AWS agent resources so the extractor discovers them.
-Requires INTEGRATION_ID (or BALKANID_INTEGRATION_ID) and the same API key env as gate.py.
+Requires INTEGRATION_ID (or BALKANID_INTEGRATION_ID) and the same API key env as the gates.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import sys
 
-# Reuse gate helpers (same repo, no extra deps).
-from gate import ci_mode, env, gql, load_dotenv, log_stderr, redact_identifier
+from balkanid_api import (
+    api_client_from_env,
+    ci_mode,
+    env_optional,
+    gql,
+    load_dotenv,
+    log_stderr,
+    redact_identifier,
+)
 
 SYNC = """
 mutation SyncIntegration($input: SyncIntegrationInput!) {
@@ -26,7 +32,7 @@ mutation SyncIntegration($input: SyncIntegrationInput!) {
 
 def integration_id() -> str:
     for name in ("INTEGRATION_ID", "BALKANID_INTEGRATION_ID"):
-        val = os.environ.get(name, "").strip()
+        val = env_optional(name)
         if val:
             return val
     raise SystemExit("missing INTEGRATION_ID (or BALKANID_INTEGRATION_ID) — required to trigger sync")
@@ -34,20 +40,19 @@ def integration_id() -> str:
 
 def main() -> int:
     load_dotenv()
-    trigger = os.environ.get("TRIGGER_INTEGRATION_SYNC", "true").strip().lower()
+    trigger = env_optional("TRIGGER_INTEGRATION_SYNC", "true").lower()
     if trigger in ("0", "false", "no", "off"):
-        print("TRIGGER_INTEGRATION_SYNC disabled; skipping sync", file=sys.stderr)
+        log_stderr("TRIGGER_INTEGRATION_SYNC disabled; skipping sync")
         return 0
 
-    url = env("BALKANID_PUBLIC_API_URL")
-    key_id = env("API_KEY_ID")
-    secret = env("API_KEY_SECRET")
+    url, key_id, secret = api_client_from_env()
     iid = integration_id()
 
     if ci_mode():
         log_stderr("triggering integration sync")
     else:
         log_stderr(f"triggering sync integration_id={iid!r}")
+
     result = gql(url, key_id, secret, SYNC, {"input": {"integrationId": iid}})
     out = result.get("syncIntegration") or {}
     if not out.get("success"):

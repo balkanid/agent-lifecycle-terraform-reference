@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, EN-8896]
   push:
-    branches: [main]
+    branches: [main, EN-8896]
 
 permissions:
   contents: read
@@ -31,8 +31,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Compile gate scripts
-        run: python3 -m py_compile scripts/gate.py scripts/service_account_gate.py scripts/balkanid_api.py scripts/trigger_sync.py
+      - name: Compile and import gate scripts
+        run: |
+          python3 -m py_compile scripts/*.py
+          python3 scripts/verify_imports.py
 
       - name: Block tracked secret files
         run: |

@@ -130,6 +130,25 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Preflight
+        env:
+          CD_OPERATION: ${{ github.event.inputs.operation }}
+          SERVICE_ACCOUNT_GATE: ${{ env.SERVICE_ACCOUNT_GATE }}
+          AGENT_GATE: ${{ env.AGENT_GATE }}
+          PROVISION_AWS_AGENT: ${{ env.PROVISION_AWS_AGENT }}
+          TRIGGER_INTEGRATION_SYNC: ${{ env.TRIGGER_INTEGRATION_SYNC }}
+          POLL_SECONDS: ${{ env.POLL_SECONDS }}
+          BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
+          BALKANID_AGENT_OWNER_EMAIL: ${{ secrets.BALKANID_AGENT_OWNER_EMAIL || vars.BALKANID_AGENT_OWNER_EMAIL }}
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          INTEGRATION_ID: ${{ secrets.BALKANID_INTEGRATION_ID || vars.BALKANID_INTEGRATION_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          SERVICE_ACCOUNT_POLICY_NAME: ${{ env.SERVICE_ACCOUNT_POLICY_NAME }}
+        run: python3 scripts/preflight.py
+
       - uses: hashicorp/setup-terraform@v3
         if: env.PROVISION_AWS_AGENT == 'true'
         with:
@@ -257,8 +276,7 @@ jobs:
             echo "::warning::Integration id not set — skipping post-apply sync"
             exit 0
           fi
-          cd "${{ github.workspace }}/scripts"
-          python3 trigger_sync.py
+          python3 scripts/trigger_sync.py
 
       - name: Gates-only complete
         if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT != 'true'

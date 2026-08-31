@@ -168,9 +168,10 @@ TRANSIENT_HTTP_CODES = frozenset({429, 502, 503, 504, 520})
 
 def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict:
     body = json.dumps({"query": query, "variables": variables}).encode()
-    max_attempts = int(env_optional("GQL_MAX_RETRIES", "5"))
+    max_attempts = max(1, int(env_optional("GQL_MAX_RETRIES", "5")))
     backoff_s = float(env_optional("GQL_RETRY_BACKOFF_SECONDS", "2"))
 
+    payload: dict | None = None
     last_err: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         req = urllib.request.Request(
@@ -207,7 +208,7 @@ def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict
                 continue
             raise SystemExit(f"public API request failed: {err}") from err
 
-    if last_err is not None:
+    if payload is None:
         raise SystemExit(f"public API request failed after {max_attempts} attempts: {last_err}")
 
     if payload.get("errors"):
@@ -288,13 +289,15 @@ def poll_request(
             )
             approval_state = approval_outcome(status, approval)
             if approval_state == "denied":
-                raise SystemExit(f"{label} denied: request_id={request_id}")
+                log_stderr(f"{label} denied: request_id={request_id}")
+                raise SystemExit(1)
             if approval_state == "approved":
                 if not wait_provisioning:
                     return node
                 prov_state = provisioning_outcome(provisioning)
                 if prov_state == "failed":
-                    raise SystemExit(f"{label} provisioning failed: request_id={request_id}")
+                    log_stderr(f"{label} provisioning failed: request_id={request_id}")
+                    raise SystemExit(1)
                 if prov_state == "provisioned":
                     return node
         time.sleep(poll_s)

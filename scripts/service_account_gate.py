@@ -11,7 +11,6 @@ Requires env vars from env.example. No third-party packages.
 from __future__ import annotations
 
 import json
-import os
 import sys
 
 from balkanid_api import (
