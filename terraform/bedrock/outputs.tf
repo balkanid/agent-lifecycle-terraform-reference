@@ -18,11 +18,6 @@ output "agentcore_harness_name" {
 }
 
 output "execution_role_arn" {
-  value       = local.harness_execution_role_arn
-  description = "IAM role the agent/harness runs as (external when JIT lifecycle mode is enabled)."
-}
-
-output "jit_identity_mode" {
-  value       = local.use_external_role
-  description = "True when harness uses a BalkanID-provisioned execution role (EN-8896)."
+  value       = local.use_classic ? aws_iam_role.bedrock_classic[0].arn : aws_iam_role.agentcore[0].arn
+  description = "IAM role the agent/harness runs as."
 }

@@ -58,16 +58,9 @@ case "$cmd" in
     trap 'rm -f "$cred_file"' EXIT
     write_aws_credentials_file "$cred_file"
 
-    echo "==> EN-8896 JIT lifecycle (create role → assign → agent gate)" >&2
+    echo "==> EN-8896 lifecycle gates (approval only — Terraform provisions AWS)" >&2
     export AWS_ACCOUNT_ID="$account_id"
     python3 "$root/scripts/lifecycle.py" apply-all
-
-    state_file="${LIFECYCLE_STATE_FILE:-$root/.lifecycle_state.json}"
-    if [[ ! -f "$state_file" ]]; then
-      echo "missing lifecycle state: $state_file" >&2
-      exit 1
-    fi
-    execution_role_arn="$(python3 -c "import json; print(json.load(open('$state_file'))['execution_role_arn'])")"
 
     backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
     if [[ "$backend_lc" == "agentcore" ]]; then
@@ -75,7 +68,7 @@ case "$cmd" in
       "$root/scripts/cleanup-agentcore-before-apply.sh"
     fi
 
-    echo "==> Terraform Bedrock stack (harness-only, external role)" >&2
+    echo "==> Terraform Bedrock stack (backend=${AGENT_BACKEND:-agentcore})" >&2
     cd "$root/terraform/bedrock"
     terraform init -input=false
     terraform apply -auto-approve \
@@ -84,7 +77,6 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
-      -var="execution_role_arn=${execution_role_arn}" \
       "$@"
 
     trigger_lc="$(printf '%s' "${TRIGGER_INTEGRATION_SYNC:-true}" | tr '[:upper:]' '[:lower:]')"
@@ -111,14 +103,7 @@ case "$cmd" in
     trap 'rm -f "$cred_file"' EXIT
     write_aws_credentials_file "$cred_file"
 
-    state_file="${LIFECYCLE_STATE_FILE:-$root/.lifecycle_state.json}"
-    extra_tf_vars=()
-    if [[ -f "$state_file" ]]; then
-      execution_role_arn="$(python3 -c "import json; print(json.load(open('$state_file'))['execution_role_arn'])")"
-      extra_tf_vars=(-var="execution_role_arn=${execution_role_arn}")
-    fi
-
-    echo "==> Terraform destroy (harness only)" >&2
+    echo "==> Terraform destroy (role + harness)" >&2
     cd "$root/terraform/bedrock"
     terraform init -input=false
     terraform destroy -auto-approve \
@@ -127,7 +112,6 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
-      "${extra_tf_vars[@]}" \
       "$@"
 
     backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
@@ -136,8 +120,10 @@ case "$cmd" in
       "$root/scripts/cleanup-agentcore-memory.sh"
     fi
 
-    echo "==> DELETE_SERVICE_ACCOUNT (deprovision BalkanID-managed role)" >&2
-    python3 "$root/scripts/lifecycle.py" delete-identity
+    state_file="${LIFECYCLE_STATE_FILE:-$root/.lifecycle_state.json}"
+    if [[ -f "$state_file" ]]; then
+      rm -f "$state_file"
+    fi
     ;;
   apply-bedrock)
     account_id="$(resolve_aws_account_id)"
