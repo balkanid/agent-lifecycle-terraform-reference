@@ -81,14 +81,22 @@ fi
 echo "Deleting AgentCore memories matching '${harness_name}': ${memory_ids}"
 for memory_id in $memory_ids; do
   echo "  -> delete-memory ${memory_id}"
-  if ! aws_cli bedrock-agentcore-control delete-memory \
+  delete_err=""
+  delete_rc=0
+  delete_err="$(aws_cli bedrock-agentcore-control delete-memory \
     --memory-id "$memory_id" \
     --region "$region" \
-    --no-cli-pager >/dev/null; then
-    echo "error: failed to delete memory ${memory_id} (check bedrock-agentcore:DeleteMemory IAM permission)" >&2
-    exit 1
+    --no-cli-pager 2>&1)" || delete_rc=$?
+  if [[ "$delete_rc" -eq 0 ]]; then
+    wait_for_memory_gone "$memory_id"
+    continue
   fi
-  wait_for_memory_gone "$memory_id"
+  if echo "$delete_err" | grep -qiE 'managed and cannot be deleted|ValidationException'; then
+    echo "warning: memory ${memory_id} is managed by AgentCore and cannot be deleted directly — skipping (harness delete should remove it, or AWS may reclaim the name later)" >&2
+    continue
+  fi
+  echo "error: failed to delete memory ${memory_id}: ${delete_err}" >&2
+  exit 1
 done
 
 echo "AgentCore memory cleanup complete."

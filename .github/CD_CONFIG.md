@@ -78,7 +78,7 @@ Set `BALKANID_INTEGRATION_ID` to your AWS integration in BalkanID. Disable step 
 3. Actions → **CD** → Run workflow → `apply`.
 4. Approve or deny in BalkanID while the job waits.
 5. To provision AWS agents: set `PROVISION_AWS_AGENT=true`, `BALKANID_INTEGRATION_ID`, add AWS secrets, run `apply` again.
-6. Run `destroy` to tear down AWS resources (uses cached Terraform state). When `AGENT_BACKEND=agentcore`, CD also runs memory cleanup for orphan AgentCore resources.
+6. Run `destroy` to tear down AWS resources (uses cached Terraform state). When `AGENT_BACKEND=agentcore`, CD also runs harness + memory cleanup for AgentCore resources Terraform may leave behind.
 
 Bedrock and AgentCore must be enabled in your chosen region when `PROVISION_AWS_AGENT=true`. Default **`AGENT_BACKEND=agentcore`** works on new AWS accounts.
 

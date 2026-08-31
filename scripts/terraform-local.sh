@@ -137,9 +137,12 @@ case "$cmd" in
 
     backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
     if [[ "$backend_lc" == "agentcore" ]]; then
-      echo "==> AgentCore memory cleanup (orphans after harness destroy)" >&2
-      "$root/scripts/cleanup-agentcore-memory.sh"
+      echo "==> AgentCore post-destroy cleanup (harness + memory)" >&2
+      "$root/scripts/cleanup-agentcore-on-destroy.sh"
     fi
+    ;;
+  cleanup-agentcore-on-destroy)
+    exec "$root/scripts/cleanup-agentcore-on-destroy.sh" "$@"
     ;;
   cleanup-agentcore-memory)
     exec "$root/scripts/cleanup-agentcore-memory.sh" "$@"
@@ -148,7 +151,7 @@ case "$cmd" in
     exec "$root/scripts/cleanup-agentcore-before-apply.sh" "$@"
     ;;
   *)
-    echo "Usage: $0 {apply-bedrock|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-before-apply}" >&2
+    echo "Usage: $0 {apply-bedrock|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-on-destroy|cleanup-agentcore-before-apply}" >&2
     exit 1
     ;;
 esac
