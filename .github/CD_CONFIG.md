@@ -44,7 +44,7 @@ Account id for Terraform IAM trust policies is resolved at runtime via `aws sts 
 | AWS access keys | Agent name, purpose, timeouts |
 | Tenant URL, employee email, integration id (recommended) | Non-identifying workflow toggles |
 
-Employee email and integration id can be variables for convenience, but **secrets are recommended** for public repositories so they are masked in logs. See [SECURITY.md](../SECURITY.md).
+Employee email and integration id can be variables for convenience; use **secrets** if you want them masked in workflow logs. See [SECURITY.md](../SECURITY.md).
 
 ## Per-run workflow overrides
 

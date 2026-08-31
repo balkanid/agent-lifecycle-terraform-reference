@@ -133,7 +133,7 @@ Pass secrets via `-var`, `TF_VAR_*`, or a gitignored `terraform.tfvars` file.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for GitHub Actions hardening, secret vs variable guidance, and what is (and is not) written to workflow logs.
+See [SECURITY.md](SECURITY.md) for reporting security issues and configuring GitHub Actions secrets.
 
 ## CI / CD (GitHub Actions)
 
@@ -183,14 +183,13 @@ The gate sends structured intent: owner email, `CREATE` action, agent name, agen
 
 See the [BalkanID Public API documentation](https://docs.balkan.id/) for request shapes, authentication, and webhooks.
 
-## Suggested walkthrough (~8 minutes)
+## Example evaluation flow
 
 1. **Problem:** agents created by platform teams without central visibility.
-2. **Gate:** show `terraform apply` or CD waiting on BalkanID; open the pending access request.
-3. **Policy:** show approval rules; optional run that is denied by policy.
-4. **Approval:** approve in the UI (or show webhook-driven resume).
-5. **Provision:** AWS agent appears only after approval (if enabled).
-6. **Governance:** integration sync maps the agent to an owner and IAM identity in BalkanID.
+2. **Gate:** run `terraform apply` or CD and show the pipeline waiting on BalkanID.
+3. **Policy:** configure approval rules; demonstrate an approved and a denied request.
+4. **Provision:** create the AWS agent only after approval (if enabled).
+5. **Governance:** run integration sync and confirm owner and IAM identity mapping in BalkanID.
 
 ## Production considerations
 
