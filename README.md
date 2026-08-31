@@ -1,109 +1,63 @@
-# Agent lifecycle PoV
+# BalkanID agent access requests — Terraform reference
 
-Reference implementation showing how **infrastructure-as-code** (Terraform) can gate AI agent creation on **BalkanID policy approval** before any cloud resources are provisioned.
+Reference implementation showing how to gate AI agent creation on **BalkanID policy approval** before provisioning cloud resources.
 
-This repository is a **customer-facing adapter pattern**, not BalkanID product code. Use it in demos, design partnerships, and as a starting point when a prospect asks for agent lifecycle governance without a runtime gateway.
+Use this repository as a starting point when your team deploys agents via Terraform, Helm, or CI/CD and wants BalkanID to govern **who may create agents**, **who owns them**, and **what was approved** — without replacing your existing IaC workflow.
 
 ## What this demonstrates
 
-Many teams deploy agents via Terraform, Helm, or CI pipelines. IAM often learns about those agents after the fact. BalkanID sits **before creation**:
+Many teams deploy agents through infrastructure-as-code. IAM and security teams often learn about those agents only after they exist. This pattern puts BalkanID **before creation**:
 
-1. IaC calls BalkanID (access request).
-2. BalkanID evaluates policy (auto-approve, manual approval, or deny).
-3. On approval, IaC continues and creates the agent in the cloud.
-4. BalkanID is the system of record for owner, approval evidence, and linked identities.
+1. Your pipeline calls the BalkanID Public API (`createRequest` with type `AGENT_ACCESS`).
+2. BalkanID evaluates your access-request policies (auto-approve, manual approval, or deny).
+3. On approval, the pipeline continues and creates the agent in AWS (optional in this repo).
+4. BalkanID remains the system of record for owner, approval evidence, and linked identities.
 
-This is **lifecycle and policy enforcement**, not runtime authorization. A separate tool (e.g. a JIT gateway) can still gate actions at invoke time.
+This is **lifecycle and policy enforcement**, not runtime authorization. You can still add invoke-time controls (for example a JIT gateway) separately.
 
 ```
-Terraform apply
-    → createRequest AGENT_ACCESS (BalkanID Public API, requestType: agent_access_request)
+Terraform / CI apply
+    → createRequest (AGENT_ACCESS)
     → policy evaluation
-    → [pending] human approval in BalkanID UI
-    → approved → apply continues → AWS agent (Bedrock Classic or AgentCore harness, optional)
-    → syncIntegration → AWS extractor discovers agent in BalkanID; map IAM identity to owner
+    → [pending] approver action in BalkanID
+    → approved → provision AWS agent (Bedrock Classic or AgentCore harness, optional)
+    → syncIntegration → integration sync discovers the agent in BalkanID
 ```
 
-Outbound webhooks (`request.actioned`) can notify customer automation when approval completes. This PoV polls the Public API; either approach is valid.
-
-## CI / CD
-
-### CI (every PR and push to `main`)
-
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml):
-
-- Python compile check for `scripts/gate.py`
-- `terraform fmt` / `validate` (gate-only; dummy vars, no live credentials)
-- IAM policy JSON validation
-- TruffleHog secret scan
-
-### CD (manual — demo pipeline waits on BalkanID)
-
-[`.github/workflows/cd.yml`](.github/workflows/cd.yml) runs **`gate.py` in GitHub Actions**, then optionally `terraform apply` and **`syncIntegration`** when AWS provisioning is enabled:
-
-```
-GitHub Actions: gate.py → createRequest (AGENT_ACCESS)
-    → [job waiting — approve/deny in BalkanID UI]
-    → approved → (PROVISION_AWS_AGENT=true) terraform apply → AgentCore harness or Classic agent
-    → (TRIGGER_INTEGRATION_SYNC=true) syncIntegration → AWS extractor sync
-    → denied → job fails, nothing in AWS
-```
-
-Gate-only (`PROVISION_AWS_AGENT=false`): the workflow stops after gate approval — no Terraform/AWS step.
-
-**Setup:** create GitHub environment `agent-lifecycle` and configure **variables + secrets** per [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md).
-
-**Run:** Actions → CD → Run workflow
-
-| Source | Examples |
-|---|---|
-| **Environment variables** | `PROVISION_AWS_AGENT`, `AGENT_BACKEND`, `TRIGGER_INTEGRATION_SYNC`, `BALKANID_PUBLIC_API_URL`, `BALKANID_INTEGRATION_ID`, `APPROVAL_WAIT_MINUTES`, `AGENT_NAME` |
-| **Environment secrets** | `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, `AWS_*` (when `PROVISION_AWS_AGENT=true`) |
-| **Per-run workflow inputs** | `operation`, `provision_aws_agent`, `agent_backend`, `trigger_integration_sync`, `approval_wait_minutes` (dropdowns; default `use-env`), optional `agent_name` (text) |
-
-While the job is running, open Access Requests in BalkanID and approve or deny.
-
-**How long it waits:** the gate polls every 5 seconds until approved, denied, or **`APPROVAL_WAIT_MINUTES`** is reached (environment variable, default **120**). Job timeout is 360 minutes.
-
-**GitHub-hosted runners:** if Cloudflare blocks the Public API (HTTP 403), see [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md#cloudflare--waf-github-hosted-runners).
-
-If approval often takes **longer than a few hours**, a single blocking job is the wrong shape — use BalkanID **`request.actioned` webhooks** to resume the pipeline (or re-run CD after approval). Polling for days is not viable in GitHub Actions.
-
-Customers can mirror this pattern in their own CI (GitHub Actions, GitLab, Jenkins, etc.) — the gate is just `python3 scripts/gate.py` before or inside Terraform.
+When approval completes, BalkanID can also notify your automation via the **`request.actioned` webhook**. This reference polls the Public API; either approach works in production.
 
 ## Repository layout
 
 ```
-agent-lifecycle-terraform-pov/
-├── scripts/gate.py          # Public API createRequest (AGENT_ACCESS) + poll until terminal
-├── scripts/trigger_sync.py  # Public API syncIntegration after Terraform creates AWS agent
-├── terraform/               # Blocks apply on gate; optional Bedrock agent resource
-├── aws/                     # Least-privilege IAM policy for demo AWS accounts
-└── env.example              # Configuration template (copy to .env, never commit)
+├── scripts/gate.py          # createRequest (AGENT_ACCESS) + poll until terminal status
+├── scripts/trigger_sync.py  # syncIntegration after AWS resources are created
+├── terraform/               # Gate-only stack (local-exec) + optional Bedrock module
+├── aws/                     # Example least-privilege IAM policy for Terraform
+└── env.example              # Configuration template (copy to .env — never commit)
 ```
 
 ## Prerequisites
 
-**BalkanID tenant**
+**BalkanID**
 
-- Agents enabled (`product-nhi`, `product-nhi-agents` feature flags).
-- At least one connected integration (used in the access request grant filter).
+- Agent access requests enabled on your tenant (ask your BalkanID administrator if the option is not visible).
+- At least one connected integration (for example AWS), used in the access request and optional post-provision sync.
 - Employee API key with permission to call `createRequest` on the [Public API](https://docs.balkan.id/).
-- Access-request policy configured for your demo (e.g. require approver; fail closed on deny).
-- Optional: webhook destination subscribed to `request.created` and `request.actioned`.
+- Access-request policy configured for your organization (for example require approver; fail closed on deny).
+- Optional: webhook destination subscribed to `request.actioned` for async pipeline resume.
 
 **Local tooling**
 
-- Python 3.11+ (stdlib only for `gate.py`).
+- Python 3.11+ (stdlib only — no pip install required).
 - Terraform 1.5+.
 
 **AWS (optional)**
 
-- Only required when `PROVISION_AWS_AGENT=true` (CD) or `./scripts/terraform-local.sh apply-bedrock` (local).
-- Bedrock enabled in **us-east-1** (or another [AgentCore-supported region](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html)).
-- Foundation model access (default: Amazon Nova Micro).
-- IAM permissions per `aws/bedrock-agent-lifecycle-iam-policy.json`.
-- **New AWS accounts** (no prior Bedrock Agents Classic usage) must use **`AGENT_BACKEND=agentcore`** — Classic agent creation is blocked in [maintenance mode](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html). Allowlisted accounts can set `AGENT_BACKEND=classic`.
+- Only required when provisioning agents (`PROVISION_AWS_AGENT=true` in CD, or `./scripts/terraform-local.sh apply-bedrock` locally).
+- Amazon Bedrock enabled in your chosen region ([AgentCore regions](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html)).
+- Foundation model access (default in this repo: Amazon Nova Micro).
+- IAM permissions per [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecycle-iam-policy.json).
+- **New AWS accounts** should use **`AGENT_BACKEND=agentcore`**. Classic Bedrock Agents are in [maintenance mode](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html) for accounts without prior usage.
 
 ## Quick start — gate only (no AWS)
 
@@ -111,23 +65,23 @@ agent-lifecycle-terraform-pov/
 
    ```bash
    cp env.example .env
-   # Edit .env: API keys, tenant URL, agent owner email, optional integration id
+   # Edit .env: Public API URL, API keys, agent owner email, optional integration id
    ```
 
-2. Run the gate script:
+2. Run the gate:
 
    ```bash
    set -a && source .env && set +a
    python3 scripts/gate.py
    ```
 
-   The script creates an access request and polls until it is approved or denied. Exit code `0` = approved, `1` = denied or timeout.
+   Exit code `0` = approved, `1` = denied or timeout.
 
-3. Approve or deny the request in BalkanID while the script is running.
+3. Approve or deny the request in BalkanID while the script runs.
 
 ## Terraform
 
-Gate-only (no AWS credentials required):
+**Gate only** (no AWS credentials):
 
 ```bash
 cd terraform
@@ -140,88 +94,111 @@ terraform apply \
   -var="integration_id=$INTEGRATION_ID"
 ```
 
-`terraform apply` **blocks** until BalkanID approves the request. Denial fails the apply.
+`terraform apply` blocks until BalkanID approves. Denial fails the apply.
 
-With Bedrock (after AWS is configured):
+**With AWS Bedrock** (after configuring `.env` and IAM):
 
 ```bash
-# Recommended: gate + Bedrock in one step (sources .env, writes isolated cred file)
 ./scripts/terraform-local.sh apply-bedrock
 ```
 
-The AgentCore execution role trust policy must include `aws:SourceAccount` and `aws:SourceArn` conditions (see `terraform/bedrock/main.tf`). Without them, harness create fails with `BedrockAgentcoreRuntimeControl` role validation errors.
+Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your account supports Bedrock Agents Classic.
 
-Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your account is allowlisted for Bedrock Agents Classic.
-
-`apply-bedrock` runs gate → Terraform → **`syncIntegration`** when `TRIGGER_INTEGRATION_SYNC=true` (default) and `INTEGRATION_ID` is set.
+When `TRIGGER_INTEGRATION_SYNC=true` and `INTEGRATION_ID` is set, `apply-bedrock` runs gate → Terraform → `syncIntegration`.
 
 ### Teardown and re-runs (AgentCore)
 
 ```bash
-# Recommended loop when reusing the same AGENT_NAME
-./scripts/terraform-local.sh destroy-bedrock   # terraform destroy + memory cleanup
-./scripts/terraform-local.sh apply-bedrock    # gate + memory cleanup + apply + sync
+./scripts/terraform-local.sh destroy-bedrock
+./scripts/terraform-local.sh apply-bedrock
 ```
 
-`apply-bedrock` and CD (before apply) run **`cleanup-agentcore-before-apply.sh`** when `AGENT_BACKEND=agentcore`. That reconciles partial failed applies: deletes CREATE_FAILED harnesses, orphan IAM roles not in Terraform state, and reserved Memory names.
-
-Orphan cleanup only:
-
-```bash
-./scripts/terraform-local.sh cleanup-agentcore-before-apply
-# memory only: ./scripts/cleanup-agentcore-memory.sh
-```
-
-Alternatively, use a fresh `AGENT_NAME` each run (e.g. `demo-support-agent-2`).
+`apply-bedrock` and the CD workflow run orphan cleanup before AgentCore apply when reusing the same `AGENT_NAME`. Alternatively, use a fresh agent name each run.
 
 ### Variables
 
 | Variable | Description |
 |---|---|
-| `run_balkanid_gate` | When `true`, runs the BalkanID gate via Terraform local-exec. CD runs `gate.py` in the workflow instead. |
+| `run_balkanid_gate` | When `true`, runs the gate via Terraform local-exec. CD runs `gate.py` in the workflow instead. |
 | `balkanid_public_api_url` | Public API base URL for your tenant. |
 | `api_key_id`, `api_key_secret` | Employee API key (sensitive). |
-| `agent_owner_email` | Employee who will own the agent (`BALKANID_AGENT_OWNER_EMAIL` in `.env` / CD). |
-| `integration_id` | Optional integration id on the agent access request. |
-| `agent_name` | Agent name in the access request and AWS resource. |
-| `agent_backend` | `agentcore` (default) or `classic` — see [Bedrock Agents Classic maintenance mode](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html). |
-| `agent_purpose`, `intended_iam_role_arn` | Optional metadata on the agent access request. |
+| `agent_owner_email` | Employee who will own the agent. |
+| `integration_id` | Optional integration id on the access request. |
+| `agent_name` | Agent name in the request and AWS resource. |
+| `agent_backend` | `agentcore` (default) or `classic`. |
+| `agent_purpose`, `intended_iam_role_arn` | Optional metadata on the access request. |
 | `foundation_model` | Bedrock model id for Classic agent or AgentCore harness. |
 
 Pass secrets via `-var`, `TF_VAR_*`, or a gitignored `terraform.tfvars` file.
 
+## CI / CD (GitHub Actions)
+
+### CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) validates Python, Terraform, and IAM policy JSON on every push/PR.
+
+### CD
+
+[`.github/workflows/cd.yml`](.github/workflows/cd.yml) runs the same gate in GitHub Actions, then optionally `terraform apply` and `syncIntegration`:
+
+```
+GitHub Actions: gate.py → createRequest (AGENT_ACCESS)
+    → [job waiting — approve/deny in BalkanID]
+    → approved → (PROVISION_AWS_AGENT=true) terraform apply
+    → (TRIGGER_INTEGRATION_SYNC=true) syncIntegration
+    → denied → job fails, no AWS resources
+```
+
+**Setup:** create GitHub environment `agent-lifecycle` per [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md).
+
+**Run:** Actions → CD → Run workflow.
+
+| Source | Examples |
+|---|---|
+| **Environment variables** | `PROVISION_AWS_AGENT`, `AGENT_BACKEND`, `TRIGGER_INTEGRATION_SYNC`, `BALKANID_PUBLIC_API_URL`, `BALKANID_INTEGRATION_ID`, `APPROVAL_WAIT_MINUTES`, `AGENT_NAME` |
+| **Environment secrets** | `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, `AWS_*` (when provisioning) |
+| **Per-run inputs** | `operation`, `provision_aws_agent`, `agent_backend`, `trigger_integration_sync`, `approval_wait_minutes`, optional `agent_name` |
+
+The gate polls every 5 seconds until approved, denied, or **`APPROVAL_WAIT_MINUTES`** (default **120**). For approvals that may take hours or days, use **`request.actioned` webhooks** to resume your pipeline instead of long-running jobs.
+
+You can mirror this pattern in GitLab CI, Jenkins, Azure DevOps, or any runner — the gate is `python3 scripts/gate.py` before or inside Terraform.
+
 ## AWS IAM policy
 
-Attach [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecycle-iam-policy.json) to the role or user running Terraform. **Replace the whole policy in IAM** (do not merge actions incrementally) — see [`aws/PERMISSIONS.md`](aws/PERMISSIONS.md). It scopes IAM role management to path `/balkanid-agent-lifecycle/` and allows both Bedrock Agents Classic and AgentCore harness APIs.
+Attach [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecycle-iam-policy.json) to the IAM user or role that runs Terraform. **Replace the entire policy in AWS** (do not merge actions incrementally) — see [`aws/PERMISSIONS.md`](aws/PERMISSIONS.md). IAM role management is scoped to path `/balkanid-agent-lifecycle/`.
 
-## How this uses BalkanID APIs today
+## BalkanID Public API usage
 
-| Capability | Where it lives | Used by this PoV? |
-|---|---|---|
-| **`createRequest` (`AGENT_ACCESS`)** | Public API — unified mutation, `agent_access_request` stored type | **Yes** — gate script calls this. |
-| **`createAgents`** | Tenant GraphQL only — `pipeline/tenant-command/...` | **No** — agents are not pre-created; AWS extractor sync discovers them after external provisioning. |
-| **`request.actioned` webhook** | Outbound webhooks (`pkg/webhooks/topics.go`) | Optional — PoV polls instead. |
+| API | Role in this reference |
+|---|---|
+| **`createRequest` (`AGENT_ACCESS`)** | Creates the agent access request before provisioning. Called by `scripts/gate.py`. |
+| **`requests` query** | Polls request status until approved or denied. |
+| **`syncIntegration`** | Triggers integration sync so BalkanID discovers the AWS agent after Terraform creates it. |
 
-The gate sends structured agent intent (`ownerEmail`, `action: CREATE`, `name`, `agentType`, optional `integrationId` and `intendedIamRoleArn`). BalkanID stores the request only — no agent entity is created upfront. After external provisioning and AWS integration sync, the agent appears in BalkanID for owner mapping and governance.
+The gate sends structured intent: owner email, `CREATE` action, agent name, agent type, and optional integration id and intended IAM role ARN. BalkanID stores the request; the agent entity appears after external provisioning and integration sync.
 
-## Suggested demo narrative (~8 minutes)
+See the [BalkanID Public API documentation](https://docs.balkan.id/) for request shapes, authentication, and webhooks.
 
-1. **Problem:** agents created by platform teams without IAM visibility.
-2. **Gate:** `terraform apply` waits on BalkanID; show the pending access request.
-3. **Policy:** show approval rules; optional second apply that auto-denies.
-4. **Webhook or poll:** show `request.actioned` (or script exiting on approve).
-5. **Payload:** AWS agent (Classic or AgentCore harness) appears only after approval (if enabled).
-6. **SoR:** AWS extractor sync shows agent in BalkanID with owner and mapped IAM identity.
-7. **Positioning:** BalkanID governs lifecycle; runtime gateways remain separate.
+## Suggested walkthrough (~8 minutes)
+
+1. **Problem:** agents created by platform teams without central visibility.
+2. **Gate:** show `terraform apply` or CD waiting on BalkanID; open the pending access request.
+3. **Policy:** show approval rules; optional run that is denied by policy.
+4. **Approval:** approve in the UI (or show webhook-driven resume).
+5. **Provision:** AWS agent appears only after approval (if enabled).
+6. **Governance:** integration sync maps the agent to an owner and IAM identity in BalkanID.
+
+## Production considerations
+
+This repository is a **reference**, not a production deployment template. Before adopting in production, plan for:
+
+- Remote Terraform state (S3 + locking) instead of the CD workflow’s cached state.
+- Webhook-driven pipeline resume instead of long polling in CI.
+- Idempotency and handling of `ASSIGN`, `UNASSIGN`, and `DELETE` agent access actions.
+- Your organization’s secrets management and least-privilege IAM boundaries.
 
 ## Out of scope
 
-- Runtime / invoke-time gateway
-- Kubernetes agent extractors
-- Inbound webhook gateway (EN-8766) — Terraform calls Public API directly
-- Production hardening (idempotency, ASSIGN/UNASSIGN/DELETE agent access actions, synchronous policy API)
-
-## Related product work
-
-- [EN-8866](https://balkanid.atlassian.net/browse/EN-8866) — agent lifecycle management (example design-partner use case)
-- [EN-8766](https://balkanid.atlassian.net/browse/EN-8766) — generic inbound webhook gateway (future ingestion path)
+- Runtime / invoke-time authorization gateways
+- Non-AWS agent platforms (pattern is the same; provisioning steps differ)
+- Kubernetes agent discovery

@@ -10,7 +10,7 @@ terraform {
 
 provider "aws" {
   region                      = var.aws_region
-  profile                     = "pov"
+  profile                     = "terraform"
   shared_config_files         = []
   shared_credentials_files    = [var.aws_credentials_file]
   skip_credentials_validation = true

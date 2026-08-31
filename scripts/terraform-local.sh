@@ -26,7 +26,7 @@ write_aws_credentials_file() {
   local path="$1"
   umask 077
   cat >"$path" <<EOF
-[pov]
+[terraform]
 aws_access_key_id = ${AWS_ACCESS_KEY_ID}
 aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
 EOF
@@ -40,7 +40,7 @@ gate_apply_vars=(
   -var="integration_id=${INTEGRATION_ID:-}"
   -var="agent_name=${AGENT_NAME:-demo-support-agent}"
   -var="agent_type=${AGENT_TYPE:-terraform}"
-  -var="agent_purpose=${AGENT_PURPOSE:-Demo agent lifecycle PoV}"
+  -var="agent_purpose=${AGENT_PURPOSE:-Agent provisioned via Terraform with BalkanID approval}"
   -var="intended_iam_role_arn=${INTENDED_IAM_ROLE_ARN:-}"
 )
 

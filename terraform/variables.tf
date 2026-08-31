@@ -43,7 +43,7 @@ variable "agent_type" {
 
 variable "agent_purpose" {
   type    = string
-  default = "Demo agent created via agent-lifecycle PoV"
+  default = "Agent provisioned via Terraform with BalkanID approval"
 }
 
 variable "intended_iam_role_arn" {

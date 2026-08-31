@@ -88,7 +88,7 @@ jobs:
       BALKANID_PUBLIC_API_URL: ${{ vars.BALKANID_PUBLIC_API_URL }}
       BALKANID_AGENT_OWNER_EMAIL: ${{ vars.BALKANID_AGENT_OWNER_EMAIL }}
       BALKANID_INTEGRATION_ID: ${{ vars.BALKANID_INTEGRATION_ID }}
-      AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Agent lifecycle CD pipeline demo' }}
+      AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Agent provisioned via Terraform with BalkanID approval' }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
 
     steps:
@@ -143,7 +143,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           umask 077
-          printf '%s\n' '[pov]' "aws_access_key_id = ${AWS_ACCESS_KEY_ID}" "aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}" > /tmp/pov-aws-credentials
+          printf '%s\n' '[terraform]' "aws_access_key_id = ${AWS_ACCESS_KEY_ID}" "aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}" > /tmp/terraform-aws-credentials
 
       - name: Resolve AWS account id
         if: env.PROVISION_AWS_AGENT == 'true'
@@ -175,7 +175,7 @@ jobs:
         if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT == 'true'
         working-directory: terraform/bedrock
         env:
-          TF_VAR_aws_credentials_file: /tmp/pov-aws-credentials
+          TF_VAR_aws_credentials_file: /tmp/terraform-aws-credentials
           TF_VAR_aws_account_id: ${{ steps.aws_account.outputs.account_id }}
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
@@ -207,7 +207,7 @@ jobs:
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true'
         working-directory: terraform/bedrock
         env:
-          TF_VAR_aws_credentials_file: /tmp/pov-aws-credentials
+          TF_VAR_aws_credentials_file: /tmp/terraform-aws-credentials
           TF_VAR_aws_account_id: ${{ steps.aws_account.outputs.account_id }}
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}

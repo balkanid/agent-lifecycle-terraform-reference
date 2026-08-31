@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import time
 import urllib.error
@@ -58,7 +57,7 @@ DENIED = {
 }
 
 USER_AGENT = (
-    "balkanid-agent-lifecycle-pov/1.0 "
+    "balkanid-agent-lifecycle-reference/1.0 "
     "(+https://github.com/balkanid/agent-lifecycle-terraform-pov)"
 )
 
@@ -85,28 +84,24 @@ def load_dotenv() -> None:
 
 def http_error_message(code: int, detail: str, url: str = "") -> str:
     lower = detail.lower()
-    if code == 403 and any(token in lower for token in ("cloudflare", "cf-ray", "blocked")):
-        ray = ""
-        match = re.search(r"Ray ID[^<]*<strong[^>]*>([^<]+)</strong>", detail, re.I)
-        if match:
-            ray = f" (Ray ID: {match.group(1).strip()})"
+    if code == 403 and "<html" in lower:
         return (
-            f"HTTP 403: Cloudflare blocked this request{ray}. "
-            "GitHub-hosted runners are often blocked by WAF — allowlist GitHub Actions "
-            "IP ranges on your tenant domain or add a WAF skip rule for /api/public "
-            "when X-Api-Key-Id is present. See .github/CD_CONFIG.md."
+            f"HTTP 403: request blocked or denied{url and f' ({url})' or ''}. "
+            "Verify BALKANID_PUBLIC_API_URL, API key id/secret, and that your "
+            "API key has Public API access."
         )
     if "<html" in lower:
         return (
             f"HTTP {code}: non-JSON response from public API "
-            "(body looks like HTML; check URL and edge/WAF rules)"
+            "(body looks like HTML; check BALKANID_PUBLIC_API_URL and credentials)"
         )
     if code == 404:
         hint = (
-            " Public API is served on the platform host (e.g. https://balkanid.dev/api/public), "
-            "not tenant subdomains like https://qa.balkanid.dev. "
-            "If .env is correct, your shell may still export a stale BALKANID_PUBLIC_API_URL — "
-            "run `echo $BALKANID_PUBLIC_API_URL` or rely on gate.py loading .env automatically."
+            " Public API is served at your tenant URL "
+            "(e.g. https://your-tenant.balkanid.app/api/public). "
+            "If .env is correct, your shell may still export a stale "
+            "BALKANID_PUBLIC_API_URL — run `echo $BALKANID_PUBLIC_API_URL` "
+            "or rely on gate.py loading .env automatically."
         )
         return f"HTTP 404 from public API: {detail.strip()}.{hint}"
     if len(detail) > 800:
@@ -172,7 +167,7 @@ def main() -> int:
     agent = os.environ.get("AGENT_NAME", "demo-support-agent").strip()
     agent_type = os.environ.get("AGENT_TYPE", "terraform").strip()
     integration = os.environ.get("INTEGRATION_ID", "").strip()
-    purpose = os.environ.get("AGENT_PURPOSE", "Demo agent lifecycle PoV").strip()
+    purpose = os.environ.get("AGENT_PURPOSE", "Agent provisioned via Terraform with BalkanID approval").strip()
     role_arn = os.environ.get("INTENDED_IAM_ROLE_ARN", "").strip()
     poll_s = int(os.environ.get("POLL_SECONDS", "5"))
     timeout_s = int(os.environ.get("POLL_TIMEOUT_SECONDS", "900"))

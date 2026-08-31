@@ -133,7 +133,7 @@ reconcile_iam_role() {
   fi
 
   echo "error: cannot read IAM role ${role_name} (exit ${get_rc}): ${get_err}" >&2
-  echo "error: ensure bedrock-lifecycle.user has the full aws/bedrock-agent-lifecycle-iam-policy.json attached in AWS (replace entire policy)." >&2
+  echo "error: ensure your Terraform IAM user has the full aws/bedrock-agent-lifecycle-iam-policy.json attached in AWS (replace entire policy)." >&2
   return 1
 }
 
