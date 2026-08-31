@@ -29,11 +29,24 @@ When approval completes, BalkanID can also notify your automation via the **`req
 ## Repository layout
 
 ```
-├── scripts/gate.py          # createRequest (AGENT_ACCESS) + poll until terminal status
-├── scripts/trigger_sync.py  # syncIntegration after AWS resources are created
-├── terraform/               # Gate-only stack (local-exec) + optional Bedrock module
-├── aws/                     # Example least-privilege IAM policy for Terraform
-└── env.example              # Configuration template (copy to .env — never commit)
+scripts/
+  gate.py                          # AGENT_ACCESS approval gate
+  service_account_gate.py          # CREATE_SERVICE_ACCOUNT approval gate
+  balkanid_api.py                  # Shared Public API helpers (retry, poll)
+  preflight.py                     # CD/local env validation
+  trigger_sync.py                  # syncIntegration after Terraform apply
+  verify_imports.py                # CI import smoke test
+  terraform-local.sh               # Local apply/destroy wrapper
+  cleanup-agentcore-before-apply.sh  # Pre-apply orphan/state reconciliation
+  reconcile-terraform-iam-state.sh   # Terraform IAM state mv/rm (sourced by pre-apply)
+  cleanup-agentcore-memory.sh      # Delete orphan AgentCore memories
+  cleanup-after-destroy.sh         # Post-destroy AWS sweep (harness, agent, IAM, memory)
+terraform/
+  bedrock/                         # IAM role + AgentCore harness or Classic agent
+aws/
+  bedrock-agent-lifecycle-iam-policy.json
+env.example
+docs/TROUBLESHOOTING.md            # CD failure guide
 ```
 
 ## Prerequisites
@@ -106,14 +119,36 @@ Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your a
 
 When `TRIGGER_INTEGRATION_SYNC=true` and `INTEGRATION_ID` is set, `apply-bedrock` runs gate → Terraform → `syncIntegration`.
 
+### Two-gate flow (service account + agent)
+
+Approval gates for service-role create and agent access; **Terraform provisions all AWS resources** after approvals:
+
+```bash
+./scripts/terraform-local.sh apply-lifecycle
+```
+
+This runs `service_account_gate.py` then `gate.py`, then Terraform.
+
+Teardown (Terraform destroy + AWS orphan sweep):
+
+```bash
+./scripts/terraform-local.sh destroy-lifecycle
+```
+
+In GitHub CD, set `SERVICE_ACCOUNT_GATE=true` and `AGENT_GATE=true` with `PROVISION_AWS_AGENT=true`. Configure `POLL_SECONDS` for poll interval (default 5). See [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md) and [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+
 ### Teardown and re-runs (AgentCore)
 
 ```bash
-./scripts/terraform-local.sh destroy-bedrock
-./scripts/terraform-local.sh apply-bedrock
+./scripts/terraform-local.sh destroy-lifecycle   # destroy + AWS sweep
+./scripts/terraform-local.sh apply-lifecycle       # gates + apply + sync
 ```
 
-`apply-bedrock` and the CD workflow run orphan cleanup before AgentCore apply when reusing the same `AGENT_NAME`. Alternatively, use a fresh agent name each run.
+`destroy-lifecycle` and CD **destroy** run `cleanup-after-destroy.sh` after Terraform to remove lingering harnesses, Classic agents, memory, and the lifecycle-path IAM role.
+
+Pre-apply reconciliation (`cleanup-agentcore-before-apply.sh`) runs before AgentCore apply when reusing the same `AGENT_NAME`. Alternatively, use a fresh agent name each run.
+
+See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for common CD failures.
 
 ### Variables
 
@@ -175,9 +210,10 @@ Attach [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecyc
 
 | API | Role in this reference |
 |---|---|
-| **`createRequest` (`AGENT_ACCESS`)** | Creates the agent access request before provisioning. Called by `scripts/gate.py`. |
-| **`requests` query** | Polls request status until approved or denied. |
-| **`syncIntegration`** | Triggers integration sync so BalkanID discovers the AWS agent after Terraform creates it. |
+| **`createRequest` (`AGENT_ACCESS`)** | Agent access gate (`scripts/gate.py`). |
+| **`createRequest` (`CREATE_SERVICE_ACCOUNT`)** | Service account gate (`scripts/service_account_gate.py`). Approval only — Terraform creates the IAM role. |
+| **`requests` query** | Polls request status until approved or denied (approval only). |
+| **`syncIntegration`** | Triggers integration sync so BalkanID discovers AWS resources after Terraform creates them. |
 
 The gate sends structured intent: owner email, `CREATE` action, agent name, agent type, and optional integration id and intended IAM role ARN. BalkanID stores the request; the agent entity appears after external provisioning and integration sync.
 

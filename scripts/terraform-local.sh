@@ -48,6 +48,85 @@ cmd="${1:-}"
 shift || true
 
 case "$cmd" in
+  apply-lifecycle)
+    account_id="$(resolve_aws_account_id)"
+    if [[ -z "$account_id" ]]; then
+      echo "AWS_ACCOUNT_ID is required in .env" >&2
+      exit 1
+    fi
+    cred_file="$(mktemp)"
+    trap 'rm -f "$cred_file"' EXIT
+    write_aws_credentials_file "$cred_file"
+
+    echo "==> Service account gate" >&2
+    export AWS_ACCOUNT_ID="$account_id"
+    python3 "$root/scripts/service_account_gate.py"
+
+    echo "==> Agent access gate" >&2
+    python3 "$root/scripts/gate.py"
+
+    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$backend_lc" == "agentcore" ]]; then
+      echo "==> AgentCore pre-apply reconciliation" >&2
+      "$root/scripts/cleanup-agentcore-before-apply.sh"
+    fi
+
+    echo "==> Terraform Bedrock stack (backend=${AGENT_BACKEND:-agentcore})" >&2
+    cd "$root/terraform/bedrock"
+    terraform init -input=false
+    terraform apply -auto-approve \
+      -var="aws_credentials_file=${cred_file}" \
+      -var="aws_account_id=${account_id}" \
+      -var="aws_region=${AWS_REGION:-us-east-1}" \
+      -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
+      -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
+      "$@"
+
+    trigger_lc="$(printf '%s' "${TRIGGER_INTEGRATION_SYNC:-true}" | tr '[:upper:]' '[:lower:]')"
+    case "$trigger_lc" in
+      0|false|no|off)
+        echo "==> TRIGGER_INTEGRATION_SYNC disabled; skipping sync" >&2
+        exit 0
+        ;;
+    esac
+    if [[ -z "${INTEGRATION_ID:-}" ]]; then
+      echo "==> INTEGRATION_ID not set — skipping post-apply sync" >&2
+      exit 0
+    fi
+    echo "==> Trigger integration sync (integration_id=${INTEGRATION_ID})" >&2
+    python3 "$root/scripts/trigger_sync.py"
+    ;;
+  destroy-lifecycle)
+    account_id="$(resolve_aws_account_id)"
+    if [[ -z "$account_id" ]]; then
+      echo "AWS_ACCOUNT_ID is required in .env" >&2
+      exit 1
+    fi
+    cred_file="$(mktemp)"
+    trap 'rm -f "$cred_file"' EXIT
+    write_aws_credentials_file "$cred_file"
+
+    echo "==> Terraform destroy (role + harness)" >&2
+    cd "$root/terraform/bedrock"
+    terraform init -input=false
+
+    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$backend_lc" == "agentcore" ]]; then
+      echo "==> AgentCore pre-destroy reconciliation" >&2
+      "$root/scripts/reconcile-agentcore-before-destroy.sh"
+    fi
+
+    terraform destroy -auto-approve \
+      -var="aws_credentials_file=${cred_file}" \
+      -var="aws_account_id=${account_id}" \
+      -var="aws_region=${AWS_REGION:-us-east-1}" \
+      -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
+      -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
+      "$@" || echo "warning: terraform destroy exited non-zero — running AWS sweep" >&2
+
+    echo "==> AWS resource sweep after destroy" >&2
+    "$root/scripts/cleanup-after-destroy.sh"
+    ;;
   apply-bedrock)
     account_id="$(resolve_aws_account_id)"
     if [[ -z "$account_id" ]]; then
@@ -140,13 +219,10 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
-      "$@"
+      "$@" || echo "warning: terraform destroy exited non-zero — running AWS sweep" >&2
 
-    backend_lc="$(printf '%s' "${AGENT_BACKEND:-agentcore}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$backend_lc" == "agentcore" ]]; then
-      echo "==> AgentCore memory cleanup" >&2
-      "$root/scripts/cleanup-agentcore-memory.sh"
-    fi
+    echo "==> AWS resource sweep after destroy" >&2
+    "$root/scripts/cleanup-after-destroy.sh"
     ;;
   cleanup-agentcore-on-destroy)
     exec "$root/scripts/cleanup-agentcore-on-destroy.sh" "$@"
@@ -157,8 +233,11 @@ case "$cmd" in
   cleanup-agentcore-before-apply)
     exec "$root/scripts/cleanup-agentcore-before-apply.sh" "$@"
     ;;
+  cleanup-after-destroy)
+    exec "$root/scripts/cleanup-after-destroy.sh" "$@"
+    ;;
   *)
-    echo "Usage: $0 {apply-bedrock|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-on-destroy|cleanup-agentcore-before-apply}" >&2
+    echo "Usage: $0 {apply-bedrock|apply-lifecycle|destroy-lifecycle|apply-gate|plan-bedrock|destroy-bedrock|cleanup-agentcore-memory|cleanup-agentcore-before-apply|cleanup-agentcore-on-destroy|cleanup-after-destroy}" >&2
     exit 1
     ;;
 esac

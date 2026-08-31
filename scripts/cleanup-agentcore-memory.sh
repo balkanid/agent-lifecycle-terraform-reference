@@ -41,7 +41,6 @@ export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 export AWS_DEFAULT_REGION="$region"
 
 list_matching_memory_ids() {
-  # Match by memory name (CreateMemory collision) and by id prefix (managed memory ARN suffix).
   aws_cli bedrock-agentcore-control list-memories \
     --region "$region" \
     --no-cli-pager \
@@ -81,7 +80,6 @@ fi
 echo "Deleting AgentCore memories matching '${harness_name}': ${memory_ids}"
 for memory_id in $memory_ids; do
   echo "  -> delete-memory ${memory_id}"
-  delete_err=""
   delete_rc=0
   delete_err="$(aws_cli bedrock-agentcore-control delete-memory \
     --memory-id "$memory_id" \
@@ -92,7 +90,7 @@ for memory_id in $memory_ids; do
     continue
   fi
   if echo "$delete_err" | grep -qiE 'managed and cannot be deleted|ValidationException'; then
-    echo "warning: memory ${memory_id} is managed by AgentCore and cannot be deleted directly — skipping (harness delete should remove it, or AWS may reclaim the name later)" >&2
+    echo "warning: memory ${memory_id} is managed by AgentCore and cannot be deleted directly — skipping (delete harness first)" >&2
     continue
   fi
   echo "error: failed to delete memory ${memory_id}: ${delete_err}" >&2

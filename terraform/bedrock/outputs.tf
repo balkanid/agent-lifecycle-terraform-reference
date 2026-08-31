@@ -18,5 +18,6 @@ output "agentcore_harness_name" {
 }
 
 output "execution_role_arn" {
-  value = local.use_classic ? aws_iam_role.bedrock_classic[0].arn : aws_iam_role.agentcore[0].arn
+  value       = aws_iam_role.execution[0].arn
+  description = "IAM role the agent/harness runs as."
 }

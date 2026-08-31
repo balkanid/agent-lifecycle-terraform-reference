@@ -1,9 +1,8 @@
 name: CD
 
-# Runs the BalkanID gate, then optionally terraform apply for AWS agent resources, then retrigger integration sync.
-# Flow (apply): gate.py → poll approval → terraform apply → syncIntegration (when enabled).
-# Gate-only (PROVISION_AWS_AGENT=false): gate.py only — no AWS/Terraform/sync.
-# PROVISION_AWS_AGENT=true is required for AgentCore harness and Classic agent provisioning (same Terraform stack).
+# Runs BalkanID approval gates, then optionally terraform apply, then syncIntegration.
+# Gates (apply): service_account_gate.py → gate.py (each optional via env / workflow inputs)
+# Flow: gates (approval only) → terraform apply (role + harness) → syncIntegration
 #
 # Configure the agent-lifecycle GitHub environment:
 #   Variables — non-sensitive defaults (see .github/CD_CONFIG.md)
@@ -21,7 +20,25 @@ on:
           - apply
           - destroy
       provision_aws_agent:
-        description: Provision AWS agent after gate (AgentCore harness or Classic)
+        description: Provision AWS agent after gates (AgentCore harness or Classic)
+        required: true
+        default: use-env
+        type: choice
+        options:
+          - use-env
+          - "true"
+          - "false"
+      service_account_gate:
+        description: Run CREATE_SERVICE_ACCOUNT approval gate before agent gate
+        required: true
+        default: use-env
+        type: choice
+        options:
+          - use-env
+          - "true"
+          - "false"
+      agent_gate:
+        description: Run AGENT_ACCESS approval gate
         required: true
         default: use-env
         type: choice
@@ -59,6 +76,18 @@ on:
           - "120"
           - "240"
           - "360"
+      poll_seconds:
+        description: Seconds between approval status polls
+        required: true
+        default: use-env
+        type: choice
+        options:
+          - use-env
+          - "5"
+          - "10"
+          - "15"
+          - "30"
+          - "60"
       agent_name:
         description: Agent / Terraform resource name (blank = use AGENT_NAME env var)
         required: false
@@ -76,16 +105,20 @@ jobs:
   terraform:
     name: "${{ github.event.inputs.operation }} (${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.AGENT_NAME || 'demo-support-agent' }})"
     runs-on: ubuntu-latest
-    # GitHub expressions do not support arithmetic; keep headroom above APPROVAL_WAIT_MINUTES.
     timeout-minutes: 360
     environment: agent-lifecycle
     env:
       PROVISION_AWS_AGENT: ${{ github.event.inputs.provision_aws_agent == 'use-env' && (vars.PROVISION_AWS_AGENT || 'false') || github.event.inputs.provision_aws_agent }}
+      SERVICE_ACCOUNT_GATE: ${{ github.event.inputs.service_account_gate == 'use-env' && (vars.SERVICE_ACCOUNT_GATE || 'false') || github.event.inputs.service_account_gate }}
+      AGENT_GATE: ${{ github.event.inputs.agent_gate == 'use-env' && (vars.AGENT_GATE || 'true') || github.event.inputs.agent_gate }}
       APPROVAL_WAIT_MINUTES: ${{ github.event.inputs.approval_wait_minutes == 'use-env' && (vars.APPROVAL_WAIT_MINUTES || '120') || github.event.inputs.approval_wait_minutes }}
+      POLL_SECONDS: ${{ github.event.inputs.poll_seconds == 'use-env' && (vars.POLL_SECONDS || '5') || github.event.inputs.poll_seconds }}
       AGENT_NAME: ${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.AGENT_NAME || 'demo-support-agent' }}
       AGENT_BACKEND: ${{ github.event.inputs.agent_backend == 'use-env' && (vars.AGENT_BACKEND || 'agentcore') || github.event.inputs.agent_backend }}
       TRIGGER_INTEGRATION_SYNC: ${{ github.event.inputs.trigger_integration_sync == 'use-env' && (vars.TRIGGER_INTEGRATION_SYNC || 'true') || github.event.inputs.trigger_integration_sync }}
       AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Agent provisioned via Terraform with BalkanID approval' }}
+      SERVICE_ACCOUNT_POLICY_NAME: ${{ vars.SERVICE_ACCOUNT_POLICY_NAME || vars.LIFECYCLE_POLICY_NAME || 'AmazonBedrockFullAccess' }}
+      SERVICE_ACCOUNT_ROLE_NAME: ${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.SERVICE_ACCOUNT_ROLE_NAME || vars.AGENT_NAME || 'demo-support-agent' }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       TF_LOG: ERROR
       TF_INPUT: "0"
@@ -96,6 +129,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Preflight
+        env:
+          CD_OPERATION: ${{ github.event.inputs.operation }}
+          SERVICE_ACCOUNT_GATE: ${{ env.SERVICE_ACCOUNT_GATE }}
+          AGENT_GATE: ${{ env.AGENT_GATE }}
+          PROVISION_AWS_AGENT: ${{ env.PROVISION_AWS_AGENT }}
+          TRIGGER_INTEGRATION_SYNC: ${{ env.TRIGGER_INTEGRATION_SYNC }}
+          POLL_SECONDS: ${{ env.POLL_SECONDS }}
+          BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
+          BALKANID_AGENT_OWNER_EMAIL: ${{ secrets.BALKANID_AGENT_OWNER_EMAIL || vars.BALKANID_AGENT_OWNER_EMAIL }}
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          INTEGRATION_ID: ${{ secrets.BALKANID_INTEGRATION_ID || vars.BALKANID_INTEGRATION_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          SERVICE_ACCOUNT_POLICY_NAME: ${{ env.SERVICE_ACCOUNT_POLICY_NAME }}
+        run: python3 scripts/preflight.py
 
       - uses: hashicorp/setup-terraform@v3
         if: env.PROVISION_AWS_AGENT == 'true'
@@ -114,25 +166,6 @@ jobs:
           restore-keys: |
             tfstate-bedrock-${{ env.AGENT_NAME }}-
 
-      - name: BalkanID gate
-        if: github.event.inputs.operation == 'apply'
-        env:
-          BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
-          BALKANID_AGENT_OWNER_EMAIL: ${{ secrets.BALKANID_AGENT_OWNER_EMAIL || vars.BALKANID_AGENT_OWNER_EMAIL }}
-          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
-          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
-          INTEGRATION_ID: ${{ secrets.BALKANID_INTEGRATION_ID || vars.BALKANID_INTEGRATION_ID }}
-          AGENT_TYPE: terraform
-        run: |
-          set +x
-          export POLL_SECONDS=5
-          export POLL_TIMEOUT_SECONDS=$((APPROVAL_WAIT_MINUTES * 60))
-          echo "::notice::provision_aws_agent=${PROVISION_AWS_AGENT}"
-          echo "::notice::agent_backend=${AGENT_BACKEND}"
-          echo "::notice::Waiting up to ${APPROVAL_WAIT_MINUTES} minutes for approval."
-          echo "::notice::Open your tenant → Access Requests while this job runs."
-          python3 scripts/gate.py
-
       - name: Write AWS credentials file
         if: env.PROVISION_AWS_AGENT == 'true'
         env:
@@ -144,7 +177,7 @@ jobs:
           printf '%s\n' '[terraform]' "aws_access_key_id = ${AWS_ACCESS_KEY_ID}" "aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}" > /tmp/terraform-aws-credentials
 
       - name: Resolve AWS account id
-        if: env.PROVISION_AWS_AGENT == 'true'
+        if: env.PROVISION_AWS_AGENT == 'true' || env.SERVICE_ACCOUNT_GATE == 'true' || env.AGENT_GATE == 'true'
         id: aws_account
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -152,9 +185,53 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
           set +x
-          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          if [[ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]]; then
+            account_id="$(aws sts get-caller-identity --query Account --output text)"
+          elif [[ -n "${{ vars.AWS_ACCOUNT_ID }}" ]]; then
+            account_id="${{ vars.AWS_ACCOUNT_ID }}"
+          else
+            echo "::error::AWS account id required for gates (set AWS secrets or AWS_ACCOUNT_ID variable)"
+            exit 1
+          fi
           echo "account_id=${account_id}" >> "$GITHUB_OUTPUT"
           echo "::notice::Resolved AWS account (last 4 digits): ***${account_id: -4}"
+
+      - name: Service account gate
+        if: github.event.inputs.operation == 'apply' && env.SERVICE_ACCOUNT_GATE == 'true'
+        env:
+          BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
+          BALKANID_AGENT_OWNER_EMAIL: ${{ secrets.BALKANID_AGENT_OWNER_EMAIL || vars.BALKANID_AGENT_OWNER_EMAIL }}
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          INTEGRATION_ID: ${{ secrets.BALKANID_INTEGRATION_ID || vars.BALKANID_INTEGRATION_ID }}
+          AWS_ACCOUNT_ID: ${{ steps.aws_account.outputs.account_id }}
+          SERVICE_ACCOUNT_POLICY_NAME: ${{ env.SERVICE_ACCOUNT_POLICY_NAME }}
+          SERVICE_ACCOUNT_ROLE_NAME: ${{ env.SERVICE_ACCOUNT_ROLE_NAME }}
+          POLL_SECONDS: ${{ env.POLL_SECONDS }}
+        run: |
+          set +x
+          export POLL_TIMEOUT_SECONDS=$((APPROVAL_WAIT_MINUTES * 60))
+          echo "::notice::Service account gate — poll every ${POLL_SECONDS}s, up to ${APPROVAL_WAIT_MINUTES} minutes"
+          python3 scripts/service_account_gate.py
+
+      - name: Agent access gate
+        if: github.event.inputs.operation == 'apply' && env.AGENT_GATE == 'true'
+        env:
+          BALKANID_PUBLIC_API_URL: ${{ secrets.BALKANID_PUBLIC_API_URL || vars.BALKANID_PUBLIC_API_URL }}
+          BALKANID_AGENT_OWNER_EMAIL: ${{ secrets.BALKANID_AGENT_OWNER_EMAIL || vars.BALKANID_AGENT_OWNER_EMAIL }}
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          INTEGRATION_ID: ${{ secrets.BALKANID_INTEGRATION_ID || vars.BALKANID_INTEGRATION_ID }}
+          AWS_ACCOUNT_ID: ${{ steps.aws_account.outputs.account_id }}
+          SERVICE_ACCOUNT_ROLE_NAME: ${{ env.SERVICE_ACCOUNT_ROLE_NAME }}
+          AGENT_TYPE: terraform
+          POLL_SECONDS: ${{ env.POLL_SECONDS }}
+        run: |
+          set +x
+          export POLL_TIMEOUT_SECONDS=$((APPROVAL_WAIT_MINUTES * 60))
+          echo "::notice::Agent access gate — poll every ${POLL_SECONDS}s, up to ${APPROVAL_WAIT_MINUTES} minutes"
+          echo "::notice::Open your tenant → Access Requests while this job runs."
+          python3 scripts/gate.py
 
       - name: Terraform init
         if: env.PROVISION_AWS_AGENT == 'true'
@@ -199,12 +276,11 @@ jobs:
             echo "::warning::Integration id not set — skipping post-apply sync"
             exit 0
           fi
-          cd "${{ github.workspace }}/scripts"
-          python3 trigger_sync.py
+          python3 scripts/trigger_sync.py
 
-      - name: Gate-only complete
+      - name: Gates-only complete
         if: github.event.inputs.operation == 'apply' && env.PROVISION_AWS_AGENT != 'true'
-        run: echo "::notice::Gate approved. PROVISION_AWS_AGENT=false — no AWS resources to apply."
+        run: echo "::notice::Gates approved. PROVISION_AWS_AGENT=false — no AWS resources to apply."
 
       - name: AgentCore pre-destroy reconciliation
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true' && env.AGENT_BACKEND == 'agentcore'
@@ -217,6 +293,7 @@ jobs:
         run: bash scripts/reconcile-agentcore-before-destroy.sh
 
       - name: Terraform destroy
+        id: terraform_destroy
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true'
         working-directory: terraform/bedrock
         env:
@@ -227,14 +304,14 @@ jobs:
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
         run: terraform destroy -auto-approve -input=false -no-color
 
-      - name: AgentCore memory cleanup
-        if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true' && env.AGENT_BACKEND == 'agentcore'
+      - name: AWS resource sweep after destroy
+        if: always() && github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.AWS_REGION }}
           AGENT_NAME: ${{ env.AGENT_NAME }}
-        run: bash scripts/cleanup-agentcore-memory.sh
+        run: bash scripts/cleanup-after-destroy.sh
 
       - name: Destroy skipped (gate-only)
         if: github.event.inputs.operation == 'destroy' && env.PROVISION_AWS_AGENT != 'true'
