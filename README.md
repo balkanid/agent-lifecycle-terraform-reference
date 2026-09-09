@@ -195,9 +195,9 @@ GitHub Actions: gate.py → createRequest (AGENT_ACCESS)
 
 | Source | Examples |
 |---|---|
-| **Environment variables** | `PROVISION_AWS_AGENT`, `AGENT_BACKEND`, `TRIGGER_INTEGRATION_SYNC`, `BALKANID_PUBLIC_API_URL`, `BALKANID_INTEGRATION_ID`, `APPROVAL_WAIT_MINUTES`, `AGENT_NAME` |
+| **Environment variables** | `PROVISION_AWS_AGENT`, `AGENT_BACKEND`, `TRIGGER_INTEGRATION_SYNC`, `GRANT_PRIVILEGED_ACCESS`, `BALKANID_PUBLIC_API_URL`, `BALKANID_INTEGRATION_ID`, `APPROVAL_WAIT_MINUTES`, `AGENT_NAME` |
 | **Environment secrets** | `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, `AWS_*` (when provisioning) |
-| **Per-run inputs** | `operation`, `provision_aws_agent`, `agent_backend`, `trigger_integration_sync`, `approval_wait_minutes`, optional `agent_name` |
+| **Per-run inputs** | `operation`, `provision_aws_agent`, `agent_backend`, `trigger_integration_sync`, `grant_privileged_access`, `approval_wait_minutes`, optional `agent_name` |
 
 The gate polls every 5 seconds until approved, denied, or **`APPROVAL_WAIT_MINUTES`** (default **120**). For approvals that may take hours or days, use **`request.actioned` webhooks** to resume your pipeline instead of long-running jobs.
 
