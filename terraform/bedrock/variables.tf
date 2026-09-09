@@ -41,6 +41,6 @@ variable "agent_instruction" {
 
 variable "grant_privileged_access" {
   type        = bool
-  description = "DEMO/TEST ONLY: attach AdministratorAccess to the agent's execution role, in addition to the narrow invoke-foundation-model policy. Use this to exercise BalkanID's post-sync \"privileged agent\" insight detection (see pipeline EN-8928) against a real Bedrock agent. Never enable this for a real, non-demo agent."
+  description = "DEMO/TEST ONLY: attach AdministratorAccess to the agent's execution role, in addition to the narrow invoke-foundation-model policy. Use this to exercise BalkanID's \"privileged agent\" risk insight against a real Bedrock agent. Never enable this for a real, non-demo agent."
   default     = false
 }

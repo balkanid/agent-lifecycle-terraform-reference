@@ -163,7 +163,7 @@ See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for common CD failures.
 | `agent_backend` | `agentcore` (default) or `classic`. |
 | `agent_purpose`, `intended_iam_role_arn` | Optional metadata on the access request. |
 | `foundation_model` | Bedrock model id for Classic agent or AgentCore harness. |
-| `grant_privileged_access` | DEMO/TEST ONLY, default `false`. Attaches `AdministratorAccess` to the execution role in addition to the narrow invoke policy, so the agent trips BalkanID's post-sync "privileged agent" insight (pipeline EN-8928). Never enable for a real agent. |
+| `grant_privileged_access` | DEMO/TEST ONLY, default `false`. Attaches `AdministratorAccess` to the execution role in addition to the narrow invoke policy, so the agent trips BalkanID's "privileged agent" risk insight. Never enable for a real agent. |
 
 Pass secrets via `-var`, `TF_VAR_*`, or a gitignored `terraform.tfvars` file.
 

@@ -87,8 +87,8 @@ resource "aws_iam_role_policy" "invoke" {
 }
 
 # DEMO/TEST ONLY (grant_privileged_access, default false): attaches AdministratorAccess to
-# the execution role so the agent trips BalkanID's post-sync "privileged agent" insight
-# (pipeline EN-8928) once extractor-aws ingests this role. Never enable for a real agent.
+# the execution role so the agent trips BalkanID's "privileged agent" risk insight once
+# BalkanID discovers this role. Never enable for a real agent.
 resource "aws_iam_role_policy_attachment" "privileged_demo" {
   count      = var.grant_privileged_access ? 1 : 0
   role       = aws_iam_role.execution[0].id
