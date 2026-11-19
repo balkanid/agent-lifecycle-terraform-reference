@@ -87,7 +87,6 @@ def create_input(owner: str, integration_id: str, role_name: str) -> dict:
                 "provisioningOption": "app",
                 "integrationId": integration_id,
                 "sourceType": "aws service role",
-                "identityType": "service account",
                 "name": role_name,
                 "scimPayload": scim_payload,
             }
