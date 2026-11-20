@@ -1,78 +1,67 @@
-# BalkanID agent access requests — Terraform reference
+# BalkanID agent lifecycle — Terraform reference
 
-Reference implementation showing how to gate AI agent creation on **BalkanID policy approval** before provisioning cloud resources.
+Reference implementation for gating AI agent creation on **BalkanID approval** before Terraform provisions anything, on any platform. Copy the pattern into the IaC and CI you already run; BalkanID decides **who may create agents**, **who owns them**, **what identity they run as** and **what was approved**.
 
-Use this repository as a starting point when your team deploys agents via Terraform, Helm, or CI/CD and wants BalkanID to govern **who may create agents**, **who owns them**, and **what was approved** — without replacing your existing IaC workflow.
-
-## What this demonstrates
-
-Many teams deploy agents through infrastructure-as-code. IAM and security teams often learn about those agents only after they exist. This pattern puts BalkanID **before creation**:
-
-1. Your pipeline calls the BalkanID Public API (`createRequest` with type `AGENT_ACCESS`).
-2. BalkanID evaluates your access-request policies (auto-approve, manual approval, or deny).
-3. On approval, the pipeline continues and creates the agent in AWS (optional in this repo).
-4. BalkanID remains the system of record for owner, approval evidence, and linked identities.
-
-This is **lifecycle and policy enforcement**, not runtime authorization. You can still add invoke-time controls (for example a JIT gateway) separately.
+Every target follows the same steps:
 
 ```
-Terraform / CI apply
-    → createRequest (AGENT_ACCESS)
-    → policy evaluation
-    → [pending] approver action in BalkanID
-    → approved → provision AWS agent (Bedrock Classic or AgentCore harness, optional)
-    → syncIntegration → integration sync discovers the agent in BalkanID
+pipeline (Terraform / CI / script)
+    → createRequest: CREATE_SERVICE_ACCOUNT (the agent's own identity)   optional
+    → createRequest: AGENT_ACCESS (the agent: owner, purpose, placement)
+    → BalkanID policies → approver acts (fail closed on deny, partial approval, timeout, API error)
+    → approved → provision the agent and its identity
+    → syncIntegration → BalkanID discovers the agent and links it to its owner
+    → SERVICE_ACCOUNT_ASSIGNMENT for time-bound sensitive access   optional
 ```
 
-When approval completes, BalkanID can also notify your automation via the **`request.actioned` webhook**. This reference polls the Public API; either approach works in production.
+This is **lifecycle and policy enforcement**, not runtime authorization. When approval completes BalkanID can also call the **`request.actioned` webhook**; this reference polls the Public API, and either works in production.
+
+| Target | What it shows | Status |
+|---|---|---|
+| [AWS Bedrock CI gate](#aws-bedrock-ci-gate) | CI/CD gates, then Terraform creates the IAM role and AgentCore harness (or Classic agent) | Run live |
+| [AWS developer-agent guardrails](#aws-developer-agent-guardrails) | Developer-created agents get their own role, a permissions boundary, an expiry and minutes-long sensitive grants | Tested against a mock API |
+| [Microsoft Copilot Studio](#microsoft-copilot-studio) | Gates a Copilot Studio agent and its Entra identity, then imports the solution | **Not run against a live tenant** |
+| [Kiro agent role](#kiro-agent-role) | Terraform for the per-agent IAM role a Kiro IDE agent assumes | Used by the Kiro reference |
 
 ## Repository layout
 
 ```
-scripts/
-  gate.py                          # AGENT_ACCESS approval gate
-  service_account_gate.py          # CREATE_SERVICE_ACCOUNT approval gate
-  balkanid_api.py                  # Shared Public API helpers (retry, poll)
-  preflight.py                     # CD/local env validation
-  trigger_sync.py                  # syncIntegration after Terraform apply
-  verify_imports.py                # CI import smoke test
-  terraform-local.sh               # Local apply/destroy wrapper
-  cleanup-agentcore-before-apply.sh  # Pre-apply orphan/state reconciliation
-  reconcile-terraform-iam-state.sh   # Terraform IAM state mv/rm (sourced by pre-apply)
-  cleanup-agentcore-memory.sh      # Delete orphan AgentCore memories
-  cleanup-after-destroy.sh         # Post-destroy AWS sweep (harness, agent, IAM, memory)
+scripts/                           Standard library only; one shared copy used by every target
+  balkanid_api.py                  Public API client: retries, polling, fail-closed outcomes, log redaction
+  gate.py                          AGENT_ACCESS gate (LIFECYCLE_TARGET picks the payload)
+  service_account_gate.py          CREATE_SERVICE_ACCOUNT gate for the agent's AWS role
+  preflight.py, trigger_sync.py, verify_imports.py
+  terraform-local.sh, cleanup-*.sh, reconcile-*.sh     AWS Bedrock CI gate (local runs, AgentCore cleanup)
+  lifecycle.sh, policy_check.py, request_sensitive_access.py, reap_expired.py   developer-agent guardrails
+  entra_agent_identity_gate.py, verify_approved_scope.py, publish_copilot_agent.py, copilot-local.sh   Copilot
 terraform/
-  bedrock/                         # IAM role + AgentCore harness or Classic agent
-aws/
-  bedrock-agent-lifecycle-iam-policy.json
-env.example
-docs/TROUBLESHOOTING.md            # CD failure guide
+  main.tf ...                      Gate-only root (AWS Bedrock CI gate)
+  bedrock/                         IAM role + AgentCore harness or Classic agent
+  bedrock-guardrails/              Developer agent: own role, permissions boundary, harness (workspace per agent)
+  grant-policies/                  Time-bound sensitive grant policies (iam_path selects Bedrock or Kiro)
+  agent-role/                      Kiro agent IAM role
+  copilot/                         Gate-only root (Copilot)
+  copilot-studio/, entra-agent-identity/   Copilot Studio solution + guardrails, Entra app registration
+policies/                          Guardrail rules and matching BalkanID request policies
+aws/, azure/                       Least-privilege provisioner policies and permission guides
+docs/                              TROUBLESHOOTING.md, BEDROCK_GUARDRAILS.md, copilot/
+tests/                             Unit and end-to-end tests against a mock BalkanID API
+.github/workflows/                 ci.yml, cd.yml (Bedrock CI gate), bedrock-guardrails*.yml, copilot-cd.yml
 ```
 
 ## Prerequisites
 
-**BalkanID**
+- BalkanID: agent access requests enabled on your tenant, a connected integration for the target platform (`INTEGRATION_ID`), an employee API key that can call `createRequest`, `requests`, `identities` and `syncIntegration` on the [Public API](https://docs.balkan.id/), and request policies for your organization.
+- Python 3.10+ (no pip install) and Terraform 1.5+. Platform credentials only when you provision.
+- `cp env.example .env` and fill in the BalkanID section. Scripts read `.env`; real environment variables win.
 
-- Agent access requests enabled on your tenant (ask your BalkanID administrator if the option is not visible).
-- At least one connected integration (for example AWS), used in the access request and optional post-provision sync.
-- Employee API key with permission to call `createRequest` on the [Public API](https://docs.balkan.id/).
-- Access-request policy configured for your organization (for example require approver; fail closed on deny).
-- Optional: webhook destination subscribed to `request.actioned` for async pipeline resume.
+## AWS Bedrock CI gate
 
-**Local tooling**
+The CI/CD flow that gates an AWS Bedrock agent: `service_account_gate.py` and `gate.py` in GitHub Actions or locally, then `terraform/bedrock`, then `syncIntegration`.
 
-- Python 3.11+ (stdlib only — no pip install required).
-- Terraform 1.5+.
+**AWS (only when provisioning):** Bedrock in your region ([AgentCore regions](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html)), model access (default Amazon Nova Micro), and [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecycle-iam-policy.json). New accounts use `AGENT_BACKEND=agentcore`; Classic Bedrock Agents are in [maintenance mode](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html).
 
-**AWS (optional)**
-
-- Only required when provisioning agents (`PROVISION_AWS_AGENT=true` in CD, or `./scripts/terraform-local.sh apply-bedrock` locally).
-- Amazon Bedrock enabled in your chosen region ([AgentCore regions](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-regions.html)).
-- Foundation model access (default in this repo: Amazon Nova Micro).
-- IAM permissions per [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecycle-iam-policy.json).
-- **New AWS accounts** should use **`AGENT_BACKEND=agentcore`**. Classic Bedrock Agents are in [maintenance mode](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-classic-maintenance-mode.html) for accounts without prior usage.
-
-## Quick start — gate only (no AWS)
+### Quick start — gate only (no AWS)
 
 1. Copy configuration:
 
@@ -88,11 +77,11 @@ docs/TROUBLESHOOTING.md            # CD failure guide
    python3 scripts/gate.py
    ```
 
-   Exit code `0` = approved, `1` = denied or timeout.
+   Exit code `0` = approved, `1` = denied or partially approved, `2` = no decision in time, `3` = Public API unreachable.
 
 3. Approve or deny the request in BalkanID while the script runs.
 
-## Terraform
+### Terraform
 
 **Gate only** (no AWS credentials):
 
@@ -119,7 +108,7 @@ Set `AGENT_BACKEND=agentcore` (default) for new accounts, or `classic` if your a
 
 When `TRIGGER_INTEGRATION_SYNC=true` and `INTEGRATION_ID` is set, `apply-bedrock` runs gate → Terraform → `syncIntegration`.
 
-### Two-gate flow (service account + agent)
+#### Two-gate flow (service account + agent)
 
 Approval gates for service-role create and agent access; **Terraform provisions all AWS resources** after approvals:
 
@@ -137,7 +126,7 @@ Teardown (Terraform destroy + AWS orphan sweep):
 
 In GitHub CD, set `SERVICE_ACCOUNT_GATE=true` and `AGENT_GATE=true` with `PROVISION_AWS_AGENT=true`. Configure `POLL_SECONDS` for poll interval (default 5). See [`.github/CD_CONFIG.md`](.github/CD_CONFIG.md) and [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
-### Teardown and re-runs (AgentCore)
+#### Teardown and re-runs (AgentCore)
 
 ```bash
 ./scripts/terraform-local.sh destroy-lifecycle   # destroy + AWS sweep
@@ -150,7 +139,7 @@ Pre-apply reconciliation (`cleanup-agentcore-before-apply.sh`) runs before Agent
 
 See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for common CD failures.
 
-### Variables
+#### Variables
 
 | Variable | Description |
 |---|---|
@@ -166,17 +155,13 @@ See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for common CD failures.
 
 Pass secrets via `-var`, `TF_VAR_*`, or a gitignored `terraform.tfvars` file.
 
-## Security
+### CI / CD (GitHub Actions)
 
-See [SECURITY.md](SECURITY.md) for reporting security issues and configuring GitHub Actions secrets.
-
-## CI / CD (GitHub Actions)
-
-### CI
+#### CI
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) validates Python, Terraform, and IAM policy JSON on every push/PR.
 
-### CD
+#### CD
 
 [`.github/workflows/cd.yml`](.github/workflows/cd.yml) runs the same gate in GitHub Actions, then optionally `terraform apply` and `syncIntegration`:
 
@@ -202,42 +187,88 @@ The gate polls every 5 seconds until approved, denied, or **`APPROVAL_WAIT_MINUT
 
 You can mirror this pattern in GitLab CI, Jenkins, Azure DevOps, or any runner — the gate is `python3 scripts/gate.py` before or inside Terraform.
 
-## AWS IAM policy
+### AWS IAM policy
 
 Attach [`aws/bedrock-agent-lifecycle-iam-policy.json`](aws/bedrock-agent-lifecycle-iam-policy.json) to the IAM user or role that runs Terraform. **Replace the entire policy in AWS** (do not merge actions incrementally) — see [`aws/PERMISSIONS.md`](aws/PERMISSIONS.md). IAM role management is scoped to path `/balkanid-agent-lifecycle/`.
 
+## AWS developer-agent guardrails
+
+For developers who create Bedrock AgentCore agents themselves. Without guardrails the agent runs as its creator; here every agent gets its own approved role `agent-<name>` under a permissions boundary, a named owner and an expiry, and reaches secrets, production or customer data only through minutes-long grants approved with step-up MFA.
+
+```
+scripts/lifecycle.sh apply dev-assistant      policy_check → CREATE_SERVICE_ACCOUNT → AGENT_ACCESS → terraform → sync
+scripts/lifecycle.sh grant dev-assistant BalkanIDAgentSecretsRead 30 "rotate staging creds"   SERVICE_ACCOUNT_ASSIGNMENT
+scripts/lifecycle.sh destroy dev-assistant    terraform destroy → sync
+bedrock-guardrails-reaper.yml (hourly, opt-in)   destroy expired agents, children first
+```
+
+It uses `terraform/bedrock-guardrails` (one Terraform workspace per agent, remote backend recommended) and `terraform/grant-policies`, separate from the CI gate's `terraform/bedrock` and its cached state. Setup, design and threat model: [docs/BEDROCK_GUARDRAILS.md](docs/BEDROCK_GUARDRAILS.md). Request policies and step-up MFA: [policies/BALKANID_POLICIES.md](policies/BALKANID_POLICIES.md).
+
+## Microsoft Copilot Studio
+
+**This path has not been run end-to-end against a live Microsoft tenant.** Treat it as a reference design and validate it in a test tenant first.
+
+Gates a Copilot Studio agent behind BalkanID approval, then provisions it with Terraform and the Power Platform CLI. Set `LIFECYCLE_TARGET=copilot`. The gates alone need no Microsoft credentials.
+
+- `terraform/copilot`: gate-only root module.
+- `terraform/copilot-studio`: Managed Environment guardrails and import of the managed solution that carries the agent.
+- `terraform/entra-agent-identity` (optional): the agent's Entra app registration with only the approved Graph permissions, gated by `scripts/entra_agent_identity_gate.py`.
+- `scripts/copilot-local.sh` (`gate`, `apply-lifecycle`, `destroy-lifecycle`) and `.github/workflows/copilot-cd.yml` (manual dispatch, environment `copilot-agent-lifecycle`).
+- `scripts/verify_approved_scope.py` fails the run if the configuration drifted from what was approved.
+
+Limits: no Terraform resource creates a Copilot Studio agent (it ships as a managed solution `.zip`), and Entra Agent ID has no Terraform support. See [docs/copilot/SETUP.md](docs/copilot/SETUP.md), [ARCHITECTURE.md](docs/copilot/ARCHITECTURE.md), [AGENT_IDENTITY.md](docs/copilot/AGENT_IDENTITY.md), [TROUBLESHOOTING.md](docs/copilot/TROUBLESHOOTING.md) and [azure/PERMISSIONS.md](azure/PERMISSIONS.md).
+
+## Kiro agent role
+
+The IDE side (Kiro agent configs, hooks, registration, short-lived credentials) lives in [agent-lifecycle-kiro-reference](https://github.com/balkanid/agent-lifecycle-kiro-reference). It uses two modules from this repository:
+
+```bash
+terraform -chdir=terraform/grant-policies apply -var='iam_path=/balkanid-kiro-agents/' \
+  -var='secret_arns=["arn:aws:secretsmanager:us-east-1:123456789012:secret:staging/*"]'   # once per account
+terraform -chdir=terraform/agent-role apply -var=agent_name=infra-helper \
+  -var='developer_principal_arns=["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_Developer_0123456789abcdef"]'
+```
+
+Run them with a principal that has [`aws/kiro-agent-provisioner-iam-policy.json`](aws/kiro-agent-provisioner-iam-policy.json).
+
+## Shared scripts
+
+`gate.py`, `service_account_gate.py` and `preflight.py` serve every target; `LIFECYCLE_TARGET` (`bedrock` by default, `bedrock-guardrails`, `copilot`) selects the payload and checks. Gates exit `0` approved, `1` denied, partially approved or request failed, `2` no decision before the timeout, `3` Public API unreachable. Every outcome but `0` stops the pipeline. In CI (`CI` or `GITHUB_ACTIONS` set) owner emails, tenant URLs and GraphQL error details are redacted from logs; API keys are never logged.
+
 ## BalkanID Public API usage
 
-| API | Role in this reference |
+| API | Used by |
 |---|---|
-| **`createRequest` (`AGENT_ACCESS`)** | Agent access gate (`scripts/gate.py`). |
-| **`createRequest` (`CREATE_SERVICE_ACCOUNT`)** | Service account gate (`scripts/service_account_gate.py`). Approval only — Terraform creates the IAM role. |
-| **`requests` query** | Polls request status until approved or denied (approval only). |
-| **`syncIntegration`** | Triggers integration sync so BalkanID discovers AWS resources after Terraform creates them. |
+| `createRequest` `AGENT_ACCESS` | `gate.py`: owner, agent name and type, integration, intended IAM role or Copilot placement (in `metadata`), expiry for developer agents |
+| `createRequest` `CREATE_SERVICE_ACCOUNT` | `service_account_gate.py` (AWS role), `entra_agent_identity_gate.py` (Entra identity). Approval only; Terraform creates the identity |
+| `createRequest` `SERVICE_ACCOUNT_ASSIGNMENT` | `request_sensitive_access.py`: time-bound grant with `duration` |
+| `requests`, `identities` | Approval polling; resolving an agent role's BalkanID identity |
+| `syncIntegration` | `trigger_sync.py` after apply and destroy |
 
-The gate sends structured intent: owner email, `CREATE` action, agent name, agent type, and optional integration id and intended IAM role ARN. BalkanID stores the request; the agent entity appears after external provisioning and integration sync.
+Requests do not send `identityType`; the request type decides it. See the [Public API documentation](https://docs.balkan.id/) for request shapes, authentication and webhooks.
 
-See the [BalkanID Public API documentation](https://docs.balkan.id/) for request shapes, authentication, and webhooks.
+## Testing
 
-## Example evaluation flow
-
-1. **Problem:** agents created by platform teams without central visibility.
-2. **Gate:** run `terraform apply` or CD and show the pipeline waiting on BalkanID.
-3. **Policy:** configure approval rules; demonstrate an approved and a denied request.
-4. **Provision:** create the AWS agent only after approval (if enabled).
-5. **Governance:** run integration sync and confirm owner and IAM identity mapping in BalkanID.
+```bash
+python3 -m unittest discover -s tests -v    # mock BalkanID API, fake terraform and aws binaries
+python3 scripts/verify_imports.py
+```
 
 ## Production considerations
 
-This repository is a **reference**, not a production deployment template. Before adopting in production, plan for:
+This repository is a **reference**, not a production deployment template. Before adopting it, plan for:
 
 - Remote Terraform state (S3 + locking) instead of the CD workflow’s cached state.
 - Webhook-driven pipeline resume instead of long polling in CI.
 - Idempotency and handling of `ASSIGN`, `UNASSIGN`, and `DELETE` agent access actions.
 - Your organization’s secrets management and least-privilege IAM boundaries.
+- GitHub OIDC (`aws-actions/configure-aws-credentials`, `azure/login`) instead of static cloud keys.
 
 ## Out of scope
 
 - Runtime / invoke-time authorization gateways
-- Non-AWS agent platforms (pattern is the same; provisioning steps differ)
 - Kubernetes agent discovery
+
+## Security
+
+See [SECURITY.md](SECURITY.md).
