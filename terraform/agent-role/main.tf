@@ -2,7 +2,9 @@ locals {
   role_path = "/balkanid-kiro-agents/"
   role_name = "kiro-agent-${var.agent_name}"
 
-  # Children share their parent's boundary, so a spawned subagent can never hold more than its parent.
+  # Children share their parent's boundary, so a spawned subagent can never exceed the parent's
+  # boundary. Its attached policies are not checked against the parent's, so within that ceiling
+  # it can hold permissions the parent itself does not.
   boundary_owner  = var.parent_agent_name != "" ? var.parent_agent_name : var.agent_name
   boundary_name   = "kiro-agent-boundary-${local.boundary_owner}"
   create_boundary = var.parent_agent_name == ""

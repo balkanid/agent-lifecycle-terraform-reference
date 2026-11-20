@@ -50,4 +50,9 @@ the one(s) for the flows you run, to separate principals where you can.
 | [`bedrock-guardrails-provisioner-iam-policy.json`](./bedrock-guardrails-provisioner-iam-policy.json) | `terraform/bedrock-guardrails`, `terraform/grant-policies` (default `iam_path`) | Roles and policies under `/balkanid-agents/`; roles can only be created with an `agent-boundary-*` permissions boundary |
 | [`kiro-agent-provisioner-iam-policy.json`](./kiro-agent-provisioner-iam-policy.json) | `terraform/agent-role`, `terraform/grant-policies` with `iam_path = "/balkanid-kiro-agents/"` | Roles and policies under `/balkanid-kiro-agents/`; roles only with a `kiro-agent-boundary-*` boundary |
 
+The AgentCore statement in `bedrock-guardrails-provisioner-iam-policy.json` is account-wide
+(`"Resource": "*"`), including `DeleteHarness` and `DeleteMemory`: the modules do not tag
+AgentCore resources yet, so IAM cannot limit deletes to agent-owned ones. Run it in an account
+(or under an SCP) where that reach is acceptable.
+
 Microsoft Copilot Studio permissions (Entra, Graph, Power Platform) are in [`azure/PERMISSIONS.md`](../azure/PERMISSIONS.md).
