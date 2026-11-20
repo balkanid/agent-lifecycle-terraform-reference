@@ -47,7 +47,7 @@ class PublishLoggingTest(unittest.TestCase):
 
 
 class VerifyApprovedScopeTest(unittest.TestCase):
-    def run_verify(self, approved: dict, **env: str) -> int:
+    def run_verify(self, approved: dict, _unset: tuple = (), **env: str) -> int:
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "approved.json")
             with open(path, "w", encoding="utf-8") as fh:
@@ -60,9 +60,13 @@ class VerifyApprovedScopeTest(unittest.TestCase):
                     "SOLUTION_UNIQUE_NAME",
                     "ENTRA_IDENTITY_DISPLAY_NAME",
                     "ENTRA_GRAPH_PERMISSIONS",
+                    "AGENT_SCHEMA_NAME",
+                    "AGENT_BOT_ID",
                 )
             }
             with mock.patch.dict(os.environ, {**clean, **env, "APPROVED_SCOPE_FILE": path}):
+                for k in _unset:
+                    os.environ.pop(k, None)
                 with mock.patch.object(sys, "stderr"), mock.patch("builtins.print"):
                     return verify.main()
 
@@ -73,6 +77,8 @@ class VerifyApprovedScopeTest(unittest.TestCase):
             "copilot_surface": "copilot-studio",
             "environment_id": "env-1",
             "solution_unique_name": "ContosoSolution",
+            "agent_schema_name": "",
+            "agent_bot_id": "",
             **extra,
         }
 
@@ -124,6 +130,26 @@ class VerifyApprovedScopeTest(unittest.TestCase):
             ENTRA_GRAPH_PERMISSIONS="Mail.ReadWrite",
         )
         self.assertEqual(code, 1)
+
+    def test_changed_publish_target_fails(self) -> None:
+        code = self.run_verify(
+            self.approved(agent_schema_name="bkn_approved"),
+            AGENT_NAME="contoso-agent",
+            POWER_PLATFORM_ENVIRONMENT_ID="env-1",
+            SOLUTION_UNIQUE_NAME="ContosoSolution",
+            AGENT_SCHEMA_NAME="bkn_other",
+        )
+        self.assertEqual(code, 1)
+
+    def test_unset_agent_name_compares_as_the_gate_default(self) -> None:
+        code = self.run_verify(
+            self.approved(agent_name="example-trial-intake-agent", entra_display_name="example-trial-intake-agent",
+                          identity_request_id="req-2", graph_application_permissions=[]),
+            _unset=("AGENT_NAME",),
+            POWER_PLATFORM_ENVIRONMENT_ID="env-1",
+            SOLUTION_UNIQUE_NAME="ContosoSolution",
+        )
+        self.assertEqual(code, 0)
 
     def test_record_without_request_id_is_not_an_approval(self) -> None:
         self.assertEqual(self.run_verify({"agent_name": "contoso-agent"}), 2)

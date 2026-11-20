@@ -39,9 +39,26 @@ if [[ -n "${SOLUTION_ZIP_PATH:-}" && "$SOLUTION_ZIP_PATH" != /* ]]; then
   export SOLUTION_ZIP_PATH
 fi
 
+# One absolute path for the approval record, used unchanged by the cleanup below, the gates
+# (which write it) and verify_approved_scope.py (which reads it). Empty disables the record.
+APPROVED_SCOPE_FILE="${APPROVED_SCOPE_FILE-.approved-scope.json}"
+if [[ -n "$APPROVED_SCOPE_FILE" && "$APPROVED_SCOPE_FILE" != /* ]]; then
+  APPROVED_SCOPE_FILE="$root/${APPROVED_SCOPE_FILE#./}"
+fi
+export APPROVED_SCOPE_FILE
+
+# The Entra identity name the identity gate approves (entra_agent_identity_gate.py).
+identity_display_name="${ENTRA_IDENTITY_DISPLAY_NAME:-${AGENT_NAME:-example-trial-intake-agent}}"
+
+identity_state_exists() {
+  [[ -n "$(terraform -chdir="$root/terraform/entra-agent-identity" state list 2>/dev/null || true)" ]]
+}
+
 run_gates() {
   # Start from a clean record so a previous run's approval cannot satisfy this one.
-  rm -f "$root/${APPROVED_SCOPE_FILE:-.approved-scope.json}"
+  if [[ -n "$APPROVED_SCOPE_FILE" ]]; then
+    rm -f "$APPROVED_SCOPE_FILE"
+  fi
 
   if [[ "${ENTRA_IDENTITY_GATE:-false}" == "true" ]]; then
     echo "==> Entra identity gate" >&2
@@ -70,7 +87,7 @@ terraform_identity() {
     export TF_VAR_tenant_id="${AZURE_TENANT_ID}"
     export TF_VAR_client_id="${AZURE_CLIENT_ID}"
     export TF_VAR_client_secret="${AZURE_CLIENT_SECRET}"
-    export TF_VAR_agent_name="${AGENT_NAME:-example-trial-intake-agent}"
+    export TF_VAR_agent_name="$identity_display_name"
     TF_VAR_graph_application_permissions="$(python3 -c 'import os, json; print(json.dumps([p.strip() for p in os.environ.get("ENTRA_GRAPH_PERMISSIONS", "").split(",") if p.strip()]))')"
     export TF_VAR_graph_application_permissions
     terraform -chdir="$root/terraform/entra-agent-identity" init -input=false
@@ -133,11 +150,15 @@ case "$cmd" in
     # Recover the agent's app id from the identity stack whenever that state exists, not
     # only on the run that created it. Otherwise a second apply-lifecycle drops
     # powerplatform_environment_application_admin and quietly unbinds the identity that
-    # was approved.
-    if [[ -z "${AGENT_APP_ID:-}" ]]; then
-      AGENT_APP_ID="$(terraform -chdir="$root/terraform/entra-agent-identity" output -raw application_id 2>/dev/null || true)"
-      export AGENT_APP_ID
+    # was approved. An identity named up front (same order as gate.py) must match it.
+    intended_id="${INTENDED_AGENT_IDENTITY_ID:-${AGENT_APP_ID:-${ENTRA_AGENT_APP_ID:-}}}"
+    recovered_id="$(terraform -chdir="$root/terraform/entra-agent-identity" output -raw application_id 2>/dev/null || true)"
+    if [[ -n "$intended_id" && -n "$recovered_id" && "$intended_id" != "$recovered_id" ]]; then
+      echo "the approved identity ($intended_id) differs from the one in terraform/entra-agent-identity state ($recovered_id); refusing to bind it" >&2
+      exit 1
     fi
+    AGENT_APP_ID="${intended_id:-$recovered_id}"
+    export AGENT_APP_ID
     [[ -n "${AGENT_APP_ID:-}" ]] && echo "==> agent identity app_id=${AGENT_APP_ID}" >&2
 
     terraform_copilot_studio apply
@@ -148,7 +169,11 @@ case "$cmd" in
   destroy-lifecycle)
     CD_OPERATION=destroy python3 "$root/scripts/preflight.py"
     terraform_copilot_studio destroy
-    if [[ "${PROVISION_AGENT_IDENTITY:-false}" == "true" ]]; then
+    # Tear down an identity this wrapper created even when PROVISION_AGENT_IDENTITY is not
+    # set on the destroy command; only an explicit RETAIN_AGENT_IDENTITY=true keeps it.
+    if [[ "${RETAIN_AGENT_IDENTITY:-false}" == "true" ]]; then
+      echo "==> RETAIN_AGENT_IDENTITY=true: keeping the Entra agent identity" >&2
+    elif [[ "${PROVISION_AGENT_IDENTITY:-false}" == "true" ]] || identity_state_exists; then
       terraform_identity destroy
     fi
     ;;

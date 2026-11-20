@@ -128,6 +128,7 @@ def copilot_input(owner: str) -> tuple[dict, dict]:
         "environmentId": api.env_optional("POWER_PLATFORM_ENVIRONMENT_ID"),
         "solutionUniqueName": api.env_optional("SOLUTION_UNIQUE_NAME"),
         "schemaName": api.env_optional("AGENT_SCHEMA_NAME"),
+        "botId": api.env_optional("AGENT_BOT_ID"),
         "intendedIdentityId": intended_identity(),
     }
     metadata = {"platform": "microsoft-copilot-studio", **{k: v for k, v in placement.items() if v}}
@@ -217,6 +218,9 @@ def main() -> int:
                 "copilot_surface": "copilot-studio",
                 "environment_id": api.env_optional("POWER_PLATFORM_ENVIRONMENT_ID"),
                 "solution_unique_name": api.env_optional("SOLUTION_UNIQUE_NAME"),
+                # publish_copilot_agent.py targets AGENT_SCHEMA_NAME, else AGENT_BOT_ID.
+                "agent_schema_name": api.env_optional("AGENT_SCHEMA_NAME"),
+                "agent_bot_id": api.env_optional("AGENT_BOT_ID"),
             }
         )
 

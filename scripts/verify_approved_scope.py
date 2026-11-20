@@ -24,6 +24,8 @@ import sys
 
 from balkanid_api import env_optional, load_dotenv, log_stderr
 
+DEFAULT_AGENT_NAME = "example-trial-intake-agent"  # gate.py and entra_agent_identity_gate.py
+
 
 def requested_permissions() -> list[str]:
     raw = env_optional("ENTRA_GRAPH_PERMISSIONS")
@@ -39,7 +41,10 @@ def compare(approved: dict) -> list[str]:
     # than skip the comparison. Fields belonging to a gate that did not run are skipped.
     required: set[str] = set()
     if approved.get("agent_request_id"):
-        required |= {"agent_name", "copilot_surface", "environment_id", "solution_unique_name"}
+        required |= {
+            "agent_name", "copilot_surface", "environment_id", "solution_unique_name",
+            "agent_schema_name", "agent_bot_id",
+        }
     if approved.get("identity_request_id"):
         required |= {"entra_display_name", "graph_application_permissions"}
 
@@ -53,7 +58,9 @@ def compare(approved: dict) -> list[str]:
                 f"{label}: approved {approved_value!r}, about to provision {current_value!r}"
             )
 
-    check("agent_name", approved.get("agent_name"), env_optional("AGENT_NAME"), "agent name")
+    # Same defaults as the gates, so an unset AGENT_NAME compares as the name that was approved.
+    agent_name = env_optional("AGENT_NAME", DEFAULT_AGENT_NAME)
+    check("agent_name", approved.get("agent_name"), agent_name, "agent name")
     # Only Copilot Studio is supported. A record naming anything else is not ours.
     check("copilot_surface", approved.get("copilot_surface"), "copilot-studio", "Copilot surface")
     check(
@@ -69,9 +76,16 @@ def compare(approved: dict) -> list[str]:
         "solution",
     )
     check(
+        "agent_schema_name",
+        approved.get("agent_schema_name"),
+        env_optional("AGENT_SCHEMA_NAME"),
+        "agent schema name (publish target)",
+    )
+    check("agent_bot_id", approved.get("agent_bot_id"), env_optional("AGENT_BOT_ID"), "agent bot id (publish target)")
+    check(
         "entra_display_name",
         approved.get("entra_display_name"),
-        env_optional("ENTRA_IDENTITY_DISPLAY_NAME") or env_optional("AGENT_NAME"),
+        env_optional("ENTRA_IDENTITY_DISPLAY_NAME") or agent_name,
         "Entra identity name",
     )
 
