@@ -14,3 +14,4 @@ actionlint
 *credentials*
 .aws/
 .lifecycle_state.json
+.approved-scope.json
