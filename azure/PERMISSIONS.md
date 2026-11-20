@@ -29,8 +29,9 @@ admin-consented (see `copilot-agent-lifecycle-graph-permissions.json`):
 
 | Permission | Needed for |
 |---|---|
-| `Application.ReadWrite.OwnedBy` | creates the agent's app registration and manages only the registrations the pipeline owns (the module makes the pipeline an owner by default). Use `Application.ReadWrite.All` only if your tenant blocks this. |
+| `Application.ReadWrite.OwnedBy` | creates the agent's app registration and manages only the registrations the pipeline owns (the module always keeps the pipeline an owner). Use `Application.ReadWrite.All` only if your tenant blocks this. |
 | `AppRoleAssignment.ReadWrite.All` | admin-consenting the agent's own Graph permissions |
+| `Application.Read.All` | reading the Microsoft Graph service principal's app roles; Graph requires it together with `AppRoleAssignment.ReadWrite.All` to grant consent |
 
 `AppRoleAssignment.ReadWrite.All` is broad: it can grant any app role. Prefer granting the agent's consent out-of-band by an admin. If your agents get their identity from the platform (see below), do not
 grant them to the pipeline: skip `terraform/entra-agent-identity` and set

@@ -20,19 +20,31 @@ data "azuread_client_config" "current" {}
 
 data "azuread_application_published_app_ids" "well_known" {}
 
-resource "azuread_service_principal" "msgraph" {
-  count        = length(var.graph_application_permissions) > 0 ? 1 : 0
-  client_id    = data.azuread_application_published_app_ids.well_known.result["MicrosoftGraph"]
-  use_existing = true
+# Read-only: a managed resource with use_existing = true would PATCH (and on destroy, delete)
+# the tenant's Microsoft Graph service principal, which Application.ReadWrite.OwnedBy cannot do.
+data "azuread_service_principal" "msgraph" {
+  count     = length(var.graph_application_permissions) > 0 ? 1 : 0
+  client_id = data.azuread_application_published_app_ids.well_known.result["MicrosoftGraph"]
+}
+
+# Earlier versions managed it as a resource; forget it without deleting Microsoft Graph.
+removed {
+  from = azuread_service_principal.msgraph
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 locals {
-  owners = length(var.owner_object_ids) > 0 ? var.owner_object_ids : [data.azuread_client_config.current.object_id]
+  # The pipeline principal always stays an owner: with Application.ReadWrite.OwnedBy it can
+  # only update or delete what it owns.
+  owners = distinct(concat([data.azuread_client_config.current.object_id], var.owner_object_ids))
 
   # Resolve requested permission values to Graph app role ids.
   graph_role_ids = length(var.graph_application_permissions) > 0 ? {
     for name in var.graph_application_permissions :
-    name => azuread_service_principal.msgraph[0].app_role_ids[name]
+    name => data.azuread_service_principal.msgraph[0].app_role_ids[name]
   } : {}
 }
 
@@ -76,7 +88,7 @@ resource "azuread_app_role_assignment" "graph" {
 
   app_role_id         = each.value
   principal_object_id = azuread_service_principal.agent.object_id
-  resource_object_id  = azuread_service_principal.msgraph[0].object_id
+  resource_object_id  = data.azuread_service_principal.msgraph[0].object_id
 }
 
 resource "azuread_application_password" "agent" {

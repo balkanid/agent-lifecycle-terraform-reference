@@ -21,7 +21,7 @@ variable "agent_name" {
 variable "owner_object_ids" {
   type        = list(string)
   default     = []
-  description = "Entra object ids of the humans accountable for this agent. Empty means the Terraform SPN owns it."
+  description = "Entra object ids of the humans accountable for this agent, added as owners alongside the Terraform SPN (which always stays an owner)."
 }
 
 variable "graph_application_permissions" {

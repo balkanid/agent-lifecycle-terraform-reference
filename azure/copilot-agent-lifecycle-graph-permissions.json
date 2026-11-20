@@ -12,6 +12,11 @@
       "value": "AppRoleAssignment.ReadWrite.All",
       "id": "06b708a9-e830-4db3-a914-8e69da51d44f",
       "usedBy": "terraform/entra-agent-identity - admin consent for the agent's own permissions"
+    },
+    {
+      "value": "Application.Read.All",
+      "id": "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",
+      "usedBy": "terraform/entra-agent-identity - reads the Microsoft Graph service principal; Graph requires it alongside AppRoleAssignment.ReadWrite.All to grant consent"
     }
   ],
   "directoryRoles": [
