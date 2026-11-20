@@ -52,7 +52,7 @@ tests/                             Unit and end-to-end tests against a mock Balk
 ## Prerequisites
 
 - BalkanID: agent access requests enabled on your tenant, a connected integration for the target platform (`INTEGRATION_ID`), an employee API key that can call `createRequest`, `requests`, `identities` and `syncIntegration` on the [Public API](https://docs.balkan.id/), and request policies for your organization.
-- Python 3.10+ (no pip install) and Terraform 1.5+. Platform credentials only when you provision.
+- Python 3.10+ (no pip install) and Terraform 1.5+ (1.7+ for `terraform/entra-agent-identity`). Platform credentials only when you provision.
 - `cp env.example .env` and fill in the BalkanID section. Scripts read `.env`; real environment variables win.
 
 ## AWS Bedrock CI gate

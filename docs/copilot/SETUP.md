@@ -37,7 +37,7 @@ You need, in the tenant:
 ## 2. Tooling
 
 ```bash
-# .NET SDK, Python 3.11+, Terraform 1.5+, Azure CLI: install with your package manager.
+# .NET SDK, Python 3.11+, Terraform 1.7+, Azure CLI: install with your package manager.
 dotnet tool install --global Microsoft.PowerApps.CLI.Tool
 export PATH="$PATH:$HOME/.dotnet/tools"
 pac --version

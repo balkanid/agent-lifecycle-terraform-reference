@@ -145,7 +145,8 @@ def check_copilot(operation: str, errors: list[str], warnings: list[str]) -> Non
             elif not os.path.isfile(path):
                 errors.append(f"SOLUTION_ZIP_PATH does not exist: {path}")
             if publish:
-                if not shutil.which(env_optional("PAC_CLI") or "pac"):
+                # copilot-cd.yml installs pac in a later step, so only check it outside Actions.
+                if os.environ.get("GITHUB_ACTIONS") != "true" and not shutil.which(env_optional("PAC_CLI") or "pac"):
                     errors.append(
                         "Power Platform CLI (pac) not on PATH — required to publish a Copilot Studio agent. "
                         "Install: dotnet tool install --global Microsoft.PowerApps.CLI.Tool"
