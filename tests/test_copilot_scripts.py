@@ -94,6 +94,17 @@ class VerifyApprovedScopeTest(unittest.TestCase):
         )
         self.assertEqual(code, 1)
 
+    def test_missing_field_from_a_gate_that_ran_fails_closed(self) -> None:
+        approved = self.approved()
+        del approved["environment_id"]
+        code = self.run_verify(
+            approved,
+            AGENT_NAME="contoso-agent",
+            POWER_PLATFORM_ENVIRONMENT_ID="env-OTHER",
+            SOLUTION_UNIQUE_NAME="ContosoSolution",
+        )
+        self.assertEqual(code, 1)
+
     def test_added_graph_permission_fails(self) -> None:
         code = self.run_verify(
             self.approved(graph_application_permissions=["Sites.Selected"]),

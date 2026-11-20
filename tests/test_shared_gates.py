@@ -134,5 +134,16 @@ class GateTests(unittest.TestCase):
         self.assertIn("LIFECYCLE_TARGET", err)
 
 
+class ApiUrlTest(unittest.TestCase):
+    def test_https_and_loopback_http_are_allowed(self) -> None:
+        for url in ("https://example.com/api/public", "http://127.0.0.1:8080/api", "http://localhost/api"):
+            self.assertEqual(api.require_api_url(url), url)
+
+    def test_other_schemes_and_remote_http_are_refused(self) -> None:
+        for url in ("http://example.com/api", "file:///etc/passwd", "ftp://example.com/x", "https:///nohost"):
+            with self.assertRaises(SystemExit):
+                api.require_api_url(url)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -34,8 +34,19 @@ def compare(approved: dict) -> list[str]:
     """Return a list of human-readable drift descriptions. Empty means no drift."""
     drift: list[str] = []
 
+    # Each gate records a fixed set of fields alongside its request id. A field missing
+    # from a gate that did run means the record is incomplete, so fail closed rather
+    # than skip the comparison. Fields belonging to a gate that did not run are skipped.
+    required: set[str] = set()
+    if approved.get("agent_request_id"):
+        required |= {"agent_name", "copilot_surface", "environment_id", "solution_unique_name"}
+    if approved.get("identity_request_id"):
+        required |= {"entra_display_name", "graph_application_permissions"}
+
     def check(field: str, approved_value, current_value, label: str) -> None:
         if field not in approved:
+            if field in required:
+                drift.append(f"{label}: missing from the approval record")
             return
         if (approved_value or "") != (current_value or ""):
             drift.append(
