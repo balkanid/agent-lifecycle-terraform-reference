@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Trigger a BalkanID integration sync via Public API syncIntegration.
 
-Run after Terraform creates AWS agent resources so the extractor discovers them.
+Run after Terraform creates or destroys an agent (AWS or Copilot) so BalkanID discovers the change.
 Requires INTEGRATION_ID (or BALKANID_INTEGRATION_ID) and the same API key env as the gates.
 """
 

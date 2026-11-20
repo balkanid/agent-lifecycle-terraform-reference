@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Shared BalkanID Public API helpers for agent-lifecycle reference scripts."""
+"""Shared BalkanID Public API helpers for every agent-lifecycle script in this repository.
+
+Standard library only, so the scripts run anywhere Python 3.10+ does (CI runners, Terraform
+local-exec, a developer laptop) with no pip install.
+
+Exit-code convention used by the gates:
+  0  approved
+  1  denied, partially approved, or a request/validation failure
+  2  the approval window elapsed with no decision (ApprovalTimeout)
+  3  the BalkanID Public API could not be reached (TransportError)
+"""
 
 from __future__ import annotations
 
@@ -58,8 +68,6 @@ APPROVED = {
     "approved",
     "completed",
     "provisioned",
-    "partially_approved",
-    "partially approved",
 }
 DENIED = {
     "denied",
@@ -67,7 +75,12 @@ DENIED = {
     "cancelled",
     "canceled",
     "failed",
+    "invalid",
 }
+# Partial approval is deliberately NOT approval. The approver granted less than was
+# requested, so continuing would provision a scope nobody authorised. Fail closed and make
+# the operator re-request what they actually need.
+PARTIAL_MARKER = "partially"
 PROVISIONED = {
     "provisioned",
     "completed",
@@ -79,6 +92,18 @@ USER_AGENT = (
     "balkanid-agent-lifecycle-reference/1.0 "
     "(+https://github.com/balkanid/agent-lifecycle-terraform-reference)"
 )
+
+
+# Which reference flow a shared script is serving. Set by the caller (workflow, Terraform
+# local-exec, scripts/lifecycle.sh); the default keeps the original Bedrock CI gate behaviour.
+LIFECYCLE_TARGETS = ("bedrock", "bedrock-guardrails", "copilot")
+
+
+def lifecycle_target() -> str:
+    target = (os.environ.get("LIFECYCLE_TARGET") or "bedrock").strip().lower()
+    if target not in LIFECYCLE_TARGETS:
+        raise SystemExit(f"invalid LIFECYCLE_TARGET={target!r}; expected one of {', '.join(LIFECYCLE_TARGETS)}")
+    return target
 
 
 def ci_mode() -> bool:
@@ -103,6 +128,8 @@ def redact_identifier(value: str, visible: int = 4) -> str:
 
 
 def load_dotenv() -> None:
+    if os.environ.get("BALKANID_SKIP_DOTENV", "").lower() in ("1", "true", "yes"):
+        return
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(root, ".env")
     if not os.path.isfile(path):
@@ -117,7 +144,8 @@ def load_dotenv() -> None:
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                 value = value[1:-1]
-            if key:
+            if key and key not in os.environ:
+                # Real environment wins over .env, so wrappers and CI can override per run.
                 os.environ[key] = value
 
 
@@ -166,6 +194,26 @@ def poll_settings() -> tuple[int, int]:
 TRANSIENT_HTTP_CODES = frozenset({429, 502, 503, 504, 520})
 
 
+class TransportError(SystemExit):
+    """Network or API failure, as distinct from a policy decision (gates exit 3).
+
+    Lets a pipeline tell "the policy service was unreachable" from "the approver said no"
+    and from "nobody answered in time".
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class ApprovalTimeout(SystemExit):
+    """The approval window elapsed with no decision (gates exit 2)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
 def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict:
     body = json.dumps({"query": query, "variables": variables}).encode()
     max_attempts = max(1, int(env_optional("GQL_MAX_RETRIES", "5")))
@@ -186,7 +234,7 @@ def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=float(env_optional("GQL_TIMEOUT_SECONDS", "120"))) as resp:
                 payload = json.loads(resp.read().decode())
             last_err = None
             break
@@ -199,17 +247,17 @@ def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict
                 time.sleep(backoff_s * attempt)
                 last_err = err
                 continue
-            raise SystemExit(http_error_message(err.code, detail, url)) from err
+            raise TransportError(http_error_message(err.code, detail, url)) from err
         except urllib.error.URLError as err:
             if attempt < max_attempts:
                 log_stderr(f"public API unreachable (attempt {attempt}/{max_attempts}); retrying")
                 time.sleep(backoff_s * attempt)
                 last_err = err
                 continue
-            raise SystemExit(f"public API request failed: {err}") from err
+            raise TransportError(f"public API request failed: {err}") from err
 
     if payload is None:
-        raise SystemExit(f"public API request failed after {max_attempts} attempts: {last_err}")
+        raise TransportError(f"public API request failed after {max_attempts} attempts: {last_err}")
 
     if payload.get("errors"):
         if ci_mode():
@@ -221,15 +269,30 @@ def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict
     return data
 
 
+def _norm(raw: str | None) -> str:
+    return (raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _is_denied(n: str) -> bool:
+    return bool(n) and (
+        n in DENIED
+        or "denied" in n
+        or "reject" in n
+        or n.startswith(("not_", "un", "non_"))
+        or "revok" in n
+        or "expired" in n
+    )
+
+
 def approval_outcome(status: str | None, approval: str | None) -> str | None:
-    for raw in (status, approval):
-        if not raw:
-            continue
-        n = raw.strip().lower().replace("-", "_").replace(" ", "_")
-        if n in DENIED or "denied" in n or "reject" in n:
-            return "denied"
-        if n in APPROVED or (("approv" in n or n.endswith("approved")) and "pending" not in n and "await" not in n):
-            return "approved"
+    """Denied wins over partial, partial over approved; only exact approved values count."""
+    fields = [_norm(status), _norm(approval)]
+    if any(_is_denied(n) for n in fields):
+        return "denied"
+    if any(PARTIAL_MARKER in n for n in fields):
+        return "partial"
+    if any(n in APPROVED for n in fields):
+        return "approved"
     return None
 
 
@@ -252,8 +315,13 @@ def get_request_node(url: str, key_id: str, secret: str, request_id: str) -> dic
     return (edges[0] or {}).get("node")
 
 
+def create_request_raw(url: str, key_id: str, secret: str, inp: dict) -> dict:
+    """Call createRequest and return the raw result (id, success, stepUpRequired)."""
+    return gql(url, key_id, secret, CREATE_REQUEST, {"input": inp})["createRequest"]
+
+
 def create_request(url: str, key_id: str, secret: str, inp: dict) -> str:
-    created = gql(url, key_id, secret, CREATE_REQUEST, {"input": inp})["createRequest"]
+    created = create_request_raw(url, key_id, secret, inp)
     if created.get("stepUpRequired"):
         raise SystemExit("step-up MFA required on createRequest; complete MFA and retry")
     if not created.get("success") or not created.get("id"):
@@ -261,6 +329,43 @@ def create_request(url: str, key_id: str, secret: str, inp: dict) -> str:
             raise SystemExit("createRequest failed (details suppressed in CI logs)")
         raise SystemExit(f"createRequest failed: {created}")
     return created["id"]
+
+
+def request_state(url: str, key_id: str, secret: str, request_id: str) -> str:
+    """One-shot status check: 'approved', 'denied', 'pending' or 'missing'. Never waits."""
+    return request_check(url, key_id, secret, request_id)[0]
+
+
+def request_check(url: str, key_id: str, secret: str, request_id: str) -> tuple[str, dict]:
+    """Like request_state, but also returns the request node for binding checks."""
+    node = get_request_node(url, key_id, secret, request_id)
+    if not node:
+        return "missing", {}
+    outcome = approval_outcome(node.get("status"), node.get("requestApprovalStatus"))
+    return outcome or "pending", node
+
+
+def find_in_metadata(metadata, key: str) -> list:
+    """Collect every value stored under `key` anywhere in a request's metadata."""
+    found: list = []
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            return found
+    if isinstance(metadata, dict):
+        for k, v in metadata.items():
+            if k == key:
+                found.append(v)
+            found.extend(find_in_metadata(v, key))
+    elif isinstance(metadata, list):
+        for v in metadata:
+            found.extend(find_in_metadata(v, key))
+    return found
+
+
+def request_type_is(node: dict, expected: str) -> bool:
+    return _norm(node.get("requestType")).replace("_request", "") in (_norm(expected), _norm(expected) + "_request")
 
 
 def poll_request(
@@ -291,6 +396,12 @@ def poll_request(
             if approval_state == "denied":
                 log_stderr(f"{label} denied: request_id={request_id}")
                 raise SystemExit(1)
+            if approval_state == "partial":
+                log_stderr(
+                    f"{label} partially approved: request_id={request_id}. The approver granted less "
+                    "than was requested, so the pipeline stops. Raise a new request for the scope you need."
+                )
+                raise SystemExit(1)
             if approval_state == "approved":
                 if not wait_provisioning:
                     return node
@@ -301,7 +412,7 @@ def poll_request(
                 if prov_state == "provisioned":
                     return node
         time.sleep(poll_s)
-    raise SystemExit(f"timed out after {timeout_s}s waiting on {label} request_id={request_id}")
+    raise ApprovalTimeout(f"timed out after {timeout_s}s waiting on {label} request_id={request_id}")
 
 
 def find_identity_id(
@@ -309,18 +420,20 @@ def find_identity_id(
     key_id: str,
     secret: str,
     integration_id: str,
-    role_name: str,
+    handle: str,
     *,
+    source_type: str = "aws service role",
     poll_s: int = 5,
     timeout_s: int = 300,
 ) -> dict:
-    """Wait until the AWS service role identity appears in the graph."""
-    log_stderr(f"resolving identity for role={role_name!r} integration={integration_id!r}")
+    """Wait until an identity (AWS service role, Entra service principal, ...) appears in the graph."""
+    shown = redact_identifier(integration_id) if ci_mode() else integration_id
+    log_stderr(f"resolving identity for handle={handle!r} integration={shown!r}")
     deadline = time.time() + timeout_s
     filt = {
-        "handle": {"_eq": role_name},
+        "handle": {"_eq": handle},
         "integration": {"id": {"_eq": integration_id}},
-        "sourceType": {"_eq": "aws service role"},
+        "sourceType": {"_eq": source_type},
     }
     while time.time() < deadline:
         listed = gql(url, key_id, secret, GET_IDENTITY, {"filter": filt, "first": 1})
@@ -330,7 +443,7 @@ def find_identity_id(
             if node.get("id"):
                 return node
         time.sleep(poll_s)
-    raise SystemExit(f"timed out resolving identity for role {role_name!r}")
+    raise SystemExit(f"timed out resolving identity for handle {handle!r}")
 
 
 def role_arn_from_identity(role_name: str, identity: dict, aws_account_id: str) -> str:
@@ -338,3 +451,37 @@ def role_arn_from_identity(role_name: str, identity: dict, aws_account_id: str) 
     if source_id.startswith("arn:aws:iam::"):
         return source_id
     return f"arn:aws:iam::{aws_account_id}:role/{role_name}"
+
+
+def object_id_from_identity(identity: dict, fallback: str = "") -> str:
+    """Entra object id (or app id) recorded on a BalkanID identity."""
+    return (identity.get("sourceId") or "").strip() or fallback
+
+
+def record_approved_scope(payload: dict) -> None:
+    """Merge what was approved into APPROVED_SCOPE_FILE (default .approved-scope.json).
+
+    A gate and the provisioning step read their configuration from the environment
+    independently. Without a record, changing a variable between the two provisions a scope
+    nobody approved. scripts/verify_approved_scope.py compares this file with the environment
+    before provisioning runs. Set APPROVED_SCOPE_FILE="" to disable.
+    """
+    path = os.environ.get("APPROVED_SCOPE_FILE", ".approved-scope.json").strip()
+    if not path:
+        return
+    existing: dict = {}
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                existing = json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+    existing.update(payload)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(existing, fh, indent=2, sort_keys=True)
+    except OSError as exc:
+        log_stderr(f"warning: could not write {path}: {exc}")
+        return
+    log_stderr(f"recorded approved scope in {path}")
