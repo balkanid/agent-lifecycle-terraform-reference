@@ -144,6 +144,43 @@ class ApiUrlTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 api.require_api_url(url)
 
+    def test_redirect_is_not_followed_with_api_key(self) -> None:
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        seen: list[str] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def _handle(self):
+                seen.append(self.path)
+                if self.path == "/api/public":
+                    self.send_response(302)
+                    self.send_header("Location", "/leak")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            do_GET = do_POST = _handle
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            url = f"http://127.0.0.1:{server.server_address[1]}/api/public"
+            with mock.patch.dict(os.environ, {"GQL_MAX_RETRIES": "1"}):
+                with self.assertRaises(api.TransportError):
+                    api.gql(url, "test-key", "secret", "query { x }", {})
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(seen, ["/api/public"])
+
 
 if __name__ == "__main__":
     unittest.main()

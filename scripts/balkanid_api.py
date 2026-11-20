@@ -246,6 +246,17 @@ def require_api_url(url: str) -> str:
     )
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects: urllib would forward the API-key headers to the new location
+    without re-checking it, so a 3xx surfaces as an HTTPError instead of being followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict:
     url = require_api_url(url)
     body = json.dumps({"query": query, "variables": variables}).encode()
@@ -267,7 +278,7 @@ def gql(url: str, key_id: str, secret: str, query: str, variables: dict) -> dict
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=float(env_optional("GQL_TIMEOUT_SECONDS", "120"))) as resp:
+            with _OPENER.open(req, timeout=float(env_optional("GQL_TIMEOUT_SECONDS", "120"))) as resp:
                 payload = json.loads(resp.read().decode())
             last_err = None
             break
