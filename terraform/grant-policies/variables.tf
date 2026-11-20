@@ -16,11 +16,13 @@ variable "iam_path" {
 
 variable "secret_arns" {
   type        = list(string)
-  description = "Secrets Manager secret ARNs an approved agent may read during a BalkanID secrets-read grant. List them explicitly; a wildcard defeats the point of the grant."
+  description = "Secrets Manager secret ARNs an approved agent may read during a BalkanID secrets-read grant. List them explicitly; at most a name prefix such as secret:staging/* or the secret:name-?????? suffix match, never secret:*."
 
   validation {
-    condition     = length(var.secret_arns) > 0 && !contains(var.secret_arns, "*")
-    error_message = "secret_arns must list at least one secret ARN and must not be \"*\"."
+    condition = length(var.secret_arns) > 0 && alltrue([
+      for a in var.secret_arns : can(regex("^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]", a))
+    ])
+    error_message = "secret_arns must list at least one Secrets Manager secret ARN with a concrete region, account and secret name (or name prefix); \"*\" and secret:* are not allowed."
   }
 }
 

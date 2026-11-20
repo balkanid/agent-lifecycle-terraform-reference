@@ -2,7 +2,8 @@
 # time-bound grant. Used by both the Bedrock developer-agent guardrails (names must match
 # "sensitive_grants" in policies/guardrails.json) and the Kiro reference (names must match the
 # "grant" entries in its .kiro/balkanid/guardrails.json; set iam_path = "/balkanid-kiro-agents/").
-# Create once per account and IAM path. Each stays inside the agent permissions boundary.
+# IAM policy names are unique per account whatever the path, so create these once per account.
+# Each stays inside the agent permissions boundary.
 
 data "aws_iam_policy_document" "secrets_read" {
   statement {
@@ -24,10 +25,24 @@ data "aws_iam_policy_document" "secrets_read" {
     for_each = length(var.ssm_parameter_arns) > 0 ? [1] : []
     content {
       sid       = "ReadApprovedParameters"
-      actions   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
+      actions   = ["ssm:GetParameter", "ssm:GetParameters"]
       resources = var.ssm_parameter_arns
     }
   }
+  # GetParametersByPath is authorized on the requested path, not on each parameter it returns,
+  # so grant it only for subtrees listed explicitly as ".../*", never for a single parameter ARN.
+  dynamic "statement" {
+    for_each = length(local.ssm_subtree_arns) > 0 ? [1] : []
+    content {
+      sid       = "ReadApprovedParameterSubtrees"
+      actions   = ["ssm:GetParametersByPath"]
+      resources = flatten([for a in local.ssm_subtree_arns : [trimsuffix(a, "/*"), a]])
+    }
+  }
+}
+
+locals {
+  ssm_subtree_arns = [for a in var.ssm_parameter_arns : a if endswith(a, "/*")]
 }
 
 data "aws_iam_policy_document" "production_read_only" {
