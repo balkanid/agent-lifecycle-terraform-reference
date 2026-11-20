@@ -1,0 +1,20 @@
+{
+  "$comment": "Graph application permissions for the pipeline service principal, needed ONLY when you run terraform/entra-agent-identity. Skip the whole file if you do not provision the agent's identity with Terraform. See azure/PERMISSIONS.md.",
+  "resourceAppId": "00000003-0000-0000-c000-000000000000",
+  "resourceDisplayName": "Microsoft Graph",
+  "applicationPermissions": [
+    {
+      "value": "Application.ReadWrite.OwnedBy",
+      "id": "18a4783c-866b-4cc7-a460-3d5e5662c884",
+      "usedBy": "terraform/entra-agent-identity - creates the agent's app registration"
+    },
+    {
+      "value": "AppRoleAssignment.ReadWrite.All",
+      "id": "06b708a9-e830-4db3-a914-8e69da51d44f",
+      "usedBy": "terraform/entra-agent-identity - admin consent for the agent's own permissions"
+    }
+  ],
+  "directoryRoles": [
+    "Power Platform Administrator (or Dynamics 365 Administrator) - for terraform/copilot-studio"
+  ]
+}
