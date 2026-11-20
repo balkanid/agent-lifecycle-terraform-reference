@@ -44,7 +44,12 @@ tf() {
 
 select_workspace() {
   tf init -input=false >/dev/null
-  tf workspace select -or-create "$agent" >/dev/null
+  # Pin the workspace for this process only. `workspace select` writes the checkout-wide
+  # .terraform/environment, so a second lifecycle.sh run could switch it mid-operation.
+  if ! tf workspace list | sed 's/^[* ]*//' | grep -qxF "$agent"; then
+    tf workspace new "$agent" >/dev/null 2>&1 || true # a parallel run may have just created it
+  fi
+  export TF_WORKSPACE="$agent"
 }
 
 case "$cmd" in
@@ -103,6 +108,7 @@ PY
       -var="owner_email=${BALKANID_AGENT_OWNER_EMAIL:-unknown@example.com}" \
       -var="expires_at=1970-01-01T00:00:00Z" \
       -var="parent_agent_name=${PARENT_AGENT:-}"
+    unset TF_WORKSPACE
     tf workspace select default >/dev/null
     tf workspace delete "$agent" >/dev/null || true
     if [[ -n "${INTEGRATION_ID:-}" ]]; then

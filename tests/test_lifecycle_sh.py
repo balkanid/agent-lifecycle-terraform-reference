@@ -20,7 +20,7 @@ from mock_balkanid import MockBalkanID  # noqa: E402
 FAKE_TF = """#!/usr/bin/env python3
 import json, os, sys
 with open(os.environ["FAKE_LOG"], "a") as fh:
-    fh.write(json.dumps(["terraform"] + sys.argv[1:]) + "\\n")
+    fh.write(json.dumps(["terraform"] + sys.argv[1:] + ["TF_WORKSPACE=" + os.environ.get("TF_WORKSPACE", "")]) + "\\n")
 """
 
 
@@ -76,6 +76,9 @@ class LifecycleScriptTests(unittest.TestCase):
         self.assertIn('-var=agent_policy_arns=["arn:aws:iam::aws:policy/AmazonBedrockLimitedAccess"]', apply)
         self.assertIn(f"-var=expires_at={self.mock.created[0]['expirationDate']}", apply)
         self.assertTrue(any("workspace" in c and "dev-assistant" in c for c in self.tf_calls()))
+        # The workspace is pinned per process, never through the shared `workspace select`.
+        self.assertIn("TF_WORKSPACE=dev-assistant", apply)
+        self.assertFalse(any(c[2:4] == ["workspace", "select"] for c in self.tf_calls()))
 
     def test_apply_refuses_admin_policy_before_any_request(self):
         proc = self.run_sh("apply", "dev-assistant", AGENT_POLICY_NAMES="AdministratorAccess")
@@ -99,7 +102,8 @@ class LifecycleScriptTests(unittest.TestCase):
     def test_destroy(self):
         proc = self.run_sh("destroy", "dev-assistant")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertTrue(any("destroy" in c for c in self.tf_calls()))
+        destroy = [c for c in self.tf_calls() if "destroy" in c][0]
+        self.assertIn("TF_WORKSPACE=dev-assistant", destroy)
 
 
 if __name__ == "__main__":
