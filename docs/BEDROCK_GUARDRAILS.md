@@ -1,0 +1,131 @@
+# AWS developer-agent guardrails (Bedrock AgentCore)
+
+For the case where **developers create Bedrock AgentCore agents and the agent would otherwise inherit the developer's permissions**. Every agent gets its own approved identity, a named owner, a permissions ceiling, minutes-long grants for sensitive access with step-up MFA, and an expiry. Driven by `scripts/lifecycle.sh` and the `terraform/bedrock-guardrails` stack, separate from the CI gate demo in `terraform/bedrock`.
+
+## Problem
+
+Developers can stand up an AWS Bedrock AgentCore agent in minutes. The fastest way to give it access is to reuse what is at hand: the developer's own role, a CI role, or a broad managed policy. The agent then holds developer-level privilege with no named owner, no approval and no end date. If it is compromised or misprompted, everything the developer can touch is in reach.
+
+## Design
+
+1. **Own identity, never the creator's.** Every agent gets a dedicated execution role under `/balkanid-agents/`, approved in BalkanID (`CREATE_SERVICE_ACCOUNT`). Reusing an existing role is refused.
+2. **Approved before it exists.** `AGENT_ACCESS` names the human owner, the requesting developer, purpose, parent, policies and expiry. Nothing is provisioned until it is approved.
+3. **Least privilege, more only on request.** The role can call its model and write logs. Anything else is a reviewed policy. Secrets, production and customer data are minutes-long grants with step-up MFA.
+4. **A ceiling that cannot be raised from inside.** A permissions boundary denies identity, organization and role-hopping actions and data destruction, whatever policies are later attached.
+5. **Subagents inherit the ceiling, not more.** A child agent has its own role but shares its parent's boundary, and is reaped with its parent.
+6. **Ephemeral.** Every agent has an approved expiry. A scheduled reaper destroys it, children first.
+
+```mermaid
+flowchart TB
+  dev["Developer or pipeline<br/>scripts/lifecycle.sh apply"] --> pc["policy_check.py<br/>auto-deny before asking"]
+  pc -- deny --> stop1["refused<br/>(admin policy, reused role, TTL too long)"]
+  pc -- allow --> sa["BalkanID CREATE_SERVICE_ACCOUNT<br/>agent-&lt;name&gt; role, expiry"]
+  sa -- approved --> ag["BalkanID AGENT_ACCESS<br/>owner, purpose, parent, expiry"]
+  ag -- approved --> tf["Terraform workspace &lt;name&gt;<br/>role + boundary + AgentCore harness"]
+  tf --> sync["syncIntegration<br/>agent visible in BalkanID"]
+  sync --> run["Agent runs as its own role"]
+  run -- needs secrets / prod / customer data --> gr["request_sensitive_access.py<br/>SERVICE_ACCOUNT_ASSIGNMENT, N minutes"]
+  gr --> mfa["Approver step-up MFA"] --> att["Grant attached, removed at expiry"]
+  reaper["bedrock-guardrails-reaper.yml (hourly)"] -- expired --> destroy["lifecycle.sh destroy<br/>children first"]
+```
+
+## Layers of control
+
+| Layer | Where | What it stops |
+|---|---|---|
+| Pre-check | `policies/guardrails.json`, `policy_check.py` | Broad managed policies, attached policy ARNs that differ from the reviewed names, reused developer/admin/human roles, the caller's own role, excessive TTLs, bad names, oversize grants. Runs before any API call. |
+| BalkanID policy engine | Request policies ([BALKANID_POLICIES.md](../policies/BALKANID_POLICIES.md)) | The same rules for requests raised any other way; routing of sensitive grants to the right approver; auto-approval of low-risk requests. |
+| Approval | `AGENT_ACCESS`, `CREATE_SERVICE_ACCOUNT` | Agents without a named owner, purpose and expiry. Fails closed on deny or timeout. |
+| Step-up | Sensitive insight on grant policies | Approving access to secrets, production or customer data without a fresh MFA check. |
+| IAM | Execution role, permissions boundary | Anything outside the approved policies and the boundary, even if a pipeline is misconfigured or a grant is too broad. |
+| Time | Expiry tag, reaper, grant duration | Agents and grants that outlive their purpose. |
+
+## Control flows
+
+### Creating an agent
+
+`scripts/lifecycle.sh apply <name>`:
+
+1. `policy_check.py` evaluates the request locally and fixes the expiry (`AGENT_EXPIRES_AT`).
+2. `service_account_gate.py` asks BalkanID to approve `agent-<name>` with the requested policies and that expiry.
+3. `gate.py` asks BalkanID to approve the agent with owner, requester, purpose, parent and `inherits_creator_permissions: false`.
+4. Terraform (one workspace per agent) creates the boundary (or looks up the parent's), the role, its policies and the AgentCore harness, tagging the role with owner and expiry.
+5. `trigger_sync.py` has BalkanID discover the agent and role, so they appear with their owner in inventory and reviews.
+
+### Sensitive access
+
+`scripts/lifecycle.sh grant <name> BalkanIDAgentSecretsRead 30 "<reason>"`:
+
+1. `policy_check.py --grant` confirms the grant exists and is within its maximum length.
+2. The agent's BalkanID service account id is resolved, and `SERVICE_ACCOUNT_ASSIGNMENT` is raised for that policy with `duration` set.
+3. The approver completes step-up MFA (because the policy is marked sensitive) and approves. BalkanID attaches the policy; it is removed when the duration ends.
+4. If BalkanID requires step-up from the requester, the request returns `stepUpRequired` and the script stops and says so.
+
+### Teardown
+
+The reaper lists roles under `/balkanid-agents/`, reads `balkanid-expires-at`, and destroys every expired agent, every descendant of an expired agent, and any agent role missing an expiry tag. The deepest descendants go first so a parent's boundary is never removed from under them. After each destroy it confirms the role is gone, and a final sync updates BalkanID.
+
+## Threat model
+
+| Threat | Mitigation |
+|---|---|
+| Agent runs with its creator's permissions | Reuse of any existing role is refused; the agent's role trusts only `bedrock-agentcore.amazonaws.com` in this account. |
+| Broad policy attached "just to get it working" | Pre-check and BalkanID auto-deny; the boundary caps services regardless. |
+| Agent escalates (creates users, attaches policies, assumes other roles) | Boundary denies `iam:*`, `sts:AssumeRole`, Organizations and SSO. |
+| Agent destroys data | Boundary denies bucket, table and key deletion and log group deletion. |
+| Long-lived forgotten agents | Required expiry, hourly reaper, reviews in BalkanID. |
+| Subagent sprawl | Children share the parent's boundary and die with the parent. |
+| Sensitive data access without oversight | Minutes-long grants, named approver, step-up MFA, audit in BalkanID. |
+
+**Limits.** Within its approved policies the agent can do what those policies allow; the boundary is the ceiling, not a content filter. Runtime inspection of individual tool calls (prompt and action level) is a separate layer, for example an MCP or AI gateway in front of the agent's tools.
+
+## Production considerations
+
+- Use a remote Terraform backend; the reaper must see the same state as the lifecycle workflow.
+- Prefer `request.actioned` webhooks over long polling for approvals that take hours.
+- Tighten `allowed_services` per team, and keep grant policies scoped to named resources.
+- Protect the `bedrock-guardrails` GitHub environment with required reviewers if it uses production credentials.
+
+## Setup
+
+**BalkanID:** Agents (Early Access), an AWS integration for the target account (`INTEGRATION_ID`), an employee API key that can call `createRequest`, `requests`, `identities` and `syncIntegration`, the request policies in [BALKANID_POLICIES.md](../policies/BALKANID_POLICIES.md), and Step-Up MFA with the grant policies marked sensitive.
+
+**AWS:** Bedrock AgentCore and model access in your region (default Amazon Nova Micro); a Terraform principal with [`aws/bedrock-guardrails-provisioner-iam-policy.json`](../aws/bedrock-guardrails-provisioner-iam-policy.json) (roles and policies only under `/balkanid-agents/`); a remote backend in `terraform/bedrock-guardrails/versions.tf` for anything beyond a local demo. Terraform 1.5+, AWS CLI v2, Python 3.10+ (standard library only).
+
+```bash
+cp env.example .env        # fill the BalkanID, AWS and "developer-agent guardrails" sections
+LIFECYCLE_TARGET=bedrock-guardrails python3 scripts/preflight.py
+terraform -chdir=terraform/grant-policies init
+terraform -chdir=terraform/grant-policies apply -var='secret_arns=["arn:aws:secretsmanager:us-east-1:123456789012:secret:staging/*"]'   # once per account
+
+scripts/lifecycle.sh apply dev-assistant
+scripts/lifecycle.sh grant dev-assistant BalkanIDAgentSecretsRead 30 "rotate staging DB credentials"
+PARENT_AGENT=dev-assistant scripts/lifecycle.sh apply log-reader     # subagent under the parent's boundary
+scripts/lifecycle.sh destroy dev-assistant
+```
+
+See the guardrails refuse a request (no API call is made):
+
+```bash
+AGENT_POLICY_NAMES=AdministratorAccess python3 scripts/policy_check.py --no-caller-check
+python3 scripts/policy_check.py --grant BalkanIDAgentSecretsRead --minutes 600
+```
+
+**GitHub Actions:** create environment `bedrock-guardrails` with secrets `BALKANID_PUBLIC_API_URL`, `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, `BALKANID_AGENT_OWNER_EMAIL`, `BALKANID_INTEGRATION_ID`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and variables `AWS_ACCOUNT_ID`, `AWS_REGION`, `AGENT_POLICY_NAMES`, `AGENT_POLICY_ARNS`. Run **Actions → Bedrock developer-agent guardrails** to apply, destroy or grant. The hourly **Bedrock developer-agent reaper** only runs once you set the repository variable `REAPER_ENABLED=true`.
+
+## Public API usage
+
+| API | Used by |
+|---|---|
+| `createRequest` `CREATE_SERVICE_ACCOUNT` | `service_account_gate.py`: the agent's own role with the reviewed policies and `expirationDate` |
+| `createRequest` `AGENT_ACCESS` | `gate.py`: owner, requester, purpose, parent, intended role ARN, `expirationDate` |
+| `createRequest` `SERVICE_ACCOUNT_ASSIGNMENT` | `request_sensitive_access.py`: grant with `duration` |
+| `requests`, `identities`, `syncIntegration` | Approval polling, resolving the role's BalkanID identity, discovery after apply and destroy |
+
+## Notes
+
+- Why a separate stack from `terraform/bedrock`: this flow keeps one Terraform workspace per agent and a remote backend the reaper can read; the CI demo keeps a single local state cached by its workflow. Sharing one directory would put per-agent workspaces next to (and the selected workspace inside) the demo's cached `.terraform`, and would mix two provider credential models.
+- The policies Terraform attaches (`AGENT_POLICY_ARNS`) must name exactly the policies BalkanID reviewed (`AGENT_POLICY_NAMES`), or `policy_check.py` refuses the run.
+- The reaper treats an agent role with no `balkanid-expires-at` tag as expired, and confirms each role is really gone after `terraform destroy`.
+- Teardown is recorded in BalkanID through `syncIntegration`; no `DELETE_SERVICE_ACCOUNT` request is raised, so expiry never waits on an approver.
+- The workflows use static AWS keys for simplicity. In production use GitHub OIDC with `aws-actions/configure-aws-credentials` and a role scoped to the provisioner policy.

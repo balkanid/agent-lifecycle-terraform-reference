@@ -108,3 +108,15 @@ Terraform state is cached per `AGENT_NAME` + branch when `PROVISION_AWS_AGENT=tr
 **Re-run vs new dispatch:** GitHub **“Re-run failed jobs”** reuses the commit from the original run. After fixes land on `main`, use **Actions → CD → Run workflow** (new dispatch) so the job checks out the latest code.
 
 See [`docs/TROUBLESHOOTING.md`](../docs/TROUBLESHOOTING.md) for common CD failures (IAM policy, stale state, app provisioning conflicts).
+
+## Other workflows
+
+Each flow uses its own GitHub environment, so the demo's AWS keys are never handed to another workflow.
+
+| Workflow | Environment | Configuration |
+|---|---|---|
+| `bedrock-guardrails.yml` (Bedrock developer-agent guardrails) | `bedrock-guardrails` | Secrets `BALKANID_PUBLIC_API_URL`, `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, `BALKANID_AGENT_OWNER_EMAIL`, `BALKANID_INTEGRATION_ID`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`; variables `AWS_ACCOUNT_ID`, `AWS_REGION`, `AGENT_POLICY_NAMES`, `AGENT_POLICY_ARNS`. Needs a remote backend in `terraform/bedrock-guardrails/versions.tf`. See [docs/BEDROCK_GUARDRAILS.md](../docs/BEDROCK_GUARDRAILS.md). |
+| `bedrock-guardrails-reaper.yml` (hourly) | `bedrock-guardrails` | Same as above. Skipped unless the **repository** variable `REAPER_ENABLED` is `true`. |
+| `copilot-cd.yml` (Copilot Studio, not yet run against a live tenant) | `copilot-agent-lifecycle` | Secrets `BALKANID_API_KEY_ID`, `BALKANID_API_KEY_SECRET`, and `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` (provision / publish / destroy only); variables `BALKANID_PUBLIC_API_URL`, `BALKANID_AGENT_OWNER_EMAIL`, `BALKANID_INTEGRATION_ID`, `AGENT_NAME`, `AGENT_PURPOSE`, `POWER_PLATFORM_ENVIRONMENT_ID`, `DATAVERSE_ORG_URL`, `SOLUTION_UNIQUE_NAME`, `SOLUTION_VERSION`, `SOLUTION_ZIP_PATH`, `AGENT_SCHEMA_NAME`, `ENTRA_GRAPH_PERMISSIONS`, optional `PAC_CLI_VERSION`, `POLL_SECONDS`, `TRIGGER_INTEGRATION_SYNC`. Terraform state is cached under `tfstate-copilot-*`, separate from the demo's `tfstate-bedrock-*`. |
+
+Add required reviewers to any environment that holds production credentials.

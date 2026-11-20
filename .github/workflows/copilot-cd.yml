@@ -1,0 +1,235 @@
+name: Copilot Studio CD
+
+# Reference pipeline for the Microsoft Copilot Studio path. It has not been run
+# end-to-end against a live Microsoft tenant - validate it in a test tenant first.
+#
+# Order: preflight -> Entra identity gate (optional) -> agent access gate -> approved-scope
+# check -> Terraform apply -> publish (optional) -> BalkanID sync. Nothing after a gate
+# runs until a human has approved the request.
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: apply or destroy
+        type: choice
+        options: [apply, destroy]
+        default: apply
+      entra_identity_gate:
+        description: Also gate (and provision) the agent's Entra identity
+        type: boolean
+        default: false
+      provision_agent:
+        description: Provision after approval (false = gate only)
+        type: boolean
+        default: false
+      publish_agent:
+        description: Publish the agent after import (only with provision_agent)
+        type: boolean
+        default: false
+      approval_wait_minutes:
+        description: Minutes to wait for approval before failing
+        type: string
+        default: "120"
+      agent_name:
+        description: Override the AGENT_NAME variable for this run
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copilot-agent-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    name: ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    environment: copilot-agent-lifecycle
+
+    # Non-secret configuration only. Secrets are attached to the individual steps that
+    # need them, so third-party actions never see them.
+    env:
+      LIFECYCLE_TARGET: copilot
+      CD_OPERATION: ${{ inputs.operation }}
+      ENTRA_IDENTITY_GATE: ${{ inputs.entra_identity_gate }}
+      AGENT_GATE: "true"
+      PROVISION_COPILOT_AGENT: ${{ inputs.provision_agent }}
+      PUBLISH_AGENT: ${{ inputs.provision_agent && inputs.publish_agent }}
+      APPROVAL_WAIT_MINUTES: ${{ inputs.approval_wait_minutes }}
+      AGENT_NAME: ${{ inputs.agent_name || vars.AGENT_NAME || 'example-trial-intake-agent' }}
+      AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Copilot agent provisioned with BalkanID approval' }}
+      POLL_SECONDS: ${{ vars.POLL_SECONDS || '5' }}
+      TRIGGER_INTEGRATION_SYNC: ${{ vars.TRIGGER_INTEGRATION_SYNC || 'true' }}
+
+      BALKANID_PUBLIC_API_URL: ${{ vars.BALKANID_PUBLIC_API_URL }}
+      BALKANID_AGENT_OWNER_EMAIL: ${{ vars.BALKANID_AGENT_OWNER_EMAIL }}
+      INTEGRATION_ID: ${{ vars.BALKANID_INTEGRATION_ID }}
+
+      POWER_PLATFORM_ENVIRONMENT_ID: ${{ vars.POWER_PLATFORM_ENVIRONMENT_ID }}
+      DATAVERSE_ORG_URL: ${{ vars.DATAVERSE_ORG_URL }}
+      SOLUTION_UNIQUE_NAME: ${{ vars.SOLUTION_UNIQUE_NAME || 'BalkanIDAgentLifecycle' }}
+      SOLUTION_VERSION: ${{ vars.SOLUTION_VERSION || '1.0.0.0' }}
+      AGENT_SCHEMA_NAME: ${{ vars.AGENT_SCHEMA_NAME }}
+      ENTRA_GRAPH_PERMISSIONS: ${{ vars.ENTRA_GRAPH_PERMISSIONS }}
+      # The managed solution .zip must exist at this path (relative to the repo root)
+      # before the apply step. Add a step that builds or fetches it; with no file the
+      # import is skipped and no agent is created.
+      SOLUTION_ZIP_PATH: ${{ vars.SOLUTION_ZIP_PATH || 'build/BalkanIDAgentLifecycle_managed.zip' }}
+
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Preflight
+        env:
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: python3 scripts/preflight.py
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        if: env.PROVISION_COPILOT_AGENT == 'true' || env.CD_OPERATION == 'destroy'
+        with:
+          terraform_version: 1.12.2
+          terraform_wrapper: false
+
+      # Local state, carried between runs in the Actions cache so destroy can find what
+      # apply created. Paths and keys are separate from the AWS reference. The cache is
+      # best-effort and can be evicted: use a remote backend before relying on this.
+      # State can contain sensitive values - restrict who can read workflow caches.
+      - name: Restore Terraform state
+        if: env.PROVISION_COPILOT_AGENT == 'true' || env.CD_OPERATION == 'destroy'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            terraform/copilot-studio/terraform.tfstate
+            terraform/copilot-studio/terraform.tfstate.backup
+            terraform/entra-agent-identity/terraform.tfstate
+            terraform/entra-agent-identity/terraform.tfstate.backup
+          key: tfstate-copilot-${{ env.AGENT_NAME }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            tfstate-copilot-${{ env.AGENT_NAME }}-${{ github.ref_name }}-
+
+      # ---- Gates. Everything below is unreachable until a human approves. ----
+
+      - name: Entra identity gate
+        if: env.CD_OPERATION == 'apply' && env.ENTRA_IDENTITY_GATE == 'true'
+        env:
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+        run: python3 scripts/entra_agent_identity_gate.py
+
+      - name: Agent access gate
+        if: env.CD_OPERATION == 'apply'
+        env:
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+        run: python3 scripts/gate.py
+
+      - name: Verify approved scope
+        if: env.CD_OPERATION == 'apply' && env.PROVISION_COPILOT_AGENT == 'true'
+        run: python3 scripts/verify_approved_scope.py
+
+      # ---- Provisioning ----
+
+      - name: Terraform apply (Entra agent identity)
+        if: env.CD_OPERATION == 'apply' && env.PROVISION_COPILOT_AGENT == 'true' && env.ENTRA_IDENTITY_GATE == 'true'
+        working-directory: terraform/entra-agent-identity
+        env:
+          TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          TF_VAR_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          TF_VAR_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          TF_VAR_agent_name: ${{ env.AGENT_NAME }}
+        run: |
+          TF_VAR_graph_application_permissions="$(python3 -c 'import os, json; print(json.dumps([p.strip() for p in os.environ.get("ENTRA_GRAPH_PERMISSIONS", "").split(",") if p.strip()]))')"
+          export TF_VAR_graph_application_permissions
+          terraform init -input=false
+          terraform apply -auto-approve
+
+      - name: Install Power Platform CLI
+        if: env.CD_OPERATION == 'apply' && env.PUBLISH_AGENT == 'true'
+        env:
+          PAC_CLI_VERSION: ${{ vars.PAC_CLI_VERSION }}
+        run: |
+          if [ -n "$PAC_CLI_VERSION" ]; then
+            dotnet tool install --global Microsoft.PowerApps.CLI.Tool --version "$PAC_CLI_VERSION"
+          else
+            dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+          fi
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Terraform apply (Copilot Studio)
+        if: env.CD_OPERATION == 'apply' && env.PROVISION_COPILOT_AGENT == 'true'
+        working-directory: terraform/copilot-studio
+        env:
+          TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          TF_VAR_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          TF_VAR_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          # Bind the approved identity: recover its app id from the identity stack state.
+          app_id="$(python3 -c 'import json, os; p = "../entra-agent-identity/terraform.tfstate"; print(json.load(open(p))["outputs"]["application_id"]["value"] if os.path.isfile(p) else "")' 2>/dev/null || true)"
+          export TF_VAR_environment_id="$POWER_PLATFORM_ENVIRONMENT_ID"
+          TF_VAR_solution_zip_path="$(realpath -m "$GITHUB_WORKSPACE/${SOLUTION_ZIP_PATH#./}")"
+          export TF_VAR_solution_zip_path
+          export TF_VAR_solution_unique_name="$SOLUTION_UNIQUE_NAME"
+          export TF_VAR_solution_version="$SOLUTION_VERSION"
+          export TF_VAR_agent_schema_name="$AGENT_SCHEMA_NAME"
+          export TF_VAR_agent_application_id="$app_id"
+          # Publishing runs as its own step below so it shows up in the log.
+          export TF_VAR_publish_agent=false
+          terraform init -input=false
+          terraform apply -auto-approve
+
+      - name: Publish agent
+        if: env.CD_OPERATION == 'apply' && env.PUBLISH_AGENT == 'true'
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: python3 scripts/publish_copilot_agent.py
+
+      - name: Terraform destroy (Copilot Studio)
+        if: env.CD_OPERATION == 'destroy'
+        working-directory: terraform/copilot-studio
+        env:
+          TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          TF_VAR_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          TF_VAR_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          export TF_VAR_environment_id="$POWER_PLATFORM_ENVIRONMENT_ID"
+          terraform init -input=false
+          terraform destroy -auto-approve
+
+      - name: Terraform destroy (Entra agent identity)
+        if: env.CD_OPERATION == 'destroy' && env.ENTRA_IDENTITY_GATE == 'true'
+        working-directory: terraform/entra-agent-identity
+        env:
+          TF_VAR_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          TF_VAR_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          TF_VAR_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          terraform init -input=false
+          terraform destroy -auto-approve
+
+      # ---- Governance ----
+
+      - name: Trigger BalkanID integration sync
+        if: env.CD_OPERATION == 'apply' && env.PROVISION_COPILOT_AGENT == 'true'
+        env:
+          API_KEY_ID: ${{ secrets.BALKANID_API_KEY_ID }}
+          API_KEY_SECRET: ${{ secrets.BALKANID_API_KEY_SECRET }}
+        run: python3 scripts/trigger_sync.py
