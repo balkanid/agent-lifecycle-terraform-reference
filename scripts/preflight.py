@@ -171,7 +171,7 @@ def main() -> int:
     try:
         target = lifecycle_target()
     except SystemExit as exc:
-        errors.append(str(exc.code))
+        errors.append(str(exc))
     else:
         CHECKS[target](operation, errors, warnings)
 
