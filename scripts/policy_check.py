@@ -90,9 +90,17 @@ def check_create(g: dict, *, agent: str, policies: list[str], ttl_hours: int,
         reasons.append(f"agent name {agent!r} does not match {g.get('agent_name_pattern')}")
 
     denied = {p.lower() for p in g.get("denied_policies", [])}
+    sensitive = set(g.get("sensitive_grants", {}))
     for p in policies:
-        if p.lower() in denied:
+        # The denylist names the common ones; any *FullAccess managed policy is broad by definition
+        # (policies/BALKANID_POLICIES.md rule 1).
+        if p.lower() in denied or "fullaccess" in p.lower():
             reasons.append(f"policy {p!r} is too broad for an agent; request a scoped policy")
+        elif p in sensitive:
+            reasons.append(
+                f"policy {p!r} is a sensitive grant; request it time-boxed with request_sensitive_access.py, "
+                "not as a permanent create-time attachment"
+            )
 
     if existing_role:
         role_reasons: list[str] = []

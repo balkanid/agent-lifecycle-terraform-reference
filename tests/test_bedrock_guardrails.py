@@ -53,6 +53,14 @@ class PolicyCheckTests(unittest.TestCase):
                 names = policy_check.policy_names(p)
                 self.assertTrue(self.check(policies=names))
 
+    def test_any_full_access_policy_denied(self):
+        names = policy_check.policy_names("arn:aws:iam::aws:policy/AmazonBedrockFullAccess")
+        self.assertTrue(any("too broad" in r for r in self.check(policies=names)))
+
+    def test_sensitive_grant_not_attachable_at_create(self):
+        r = self.check(policies=["BalkanIDAgentSecretsRead"])
+        self.assertTrue(any("sensitive grant" in x for x in r))
+
     def test_developer_sso_role_denied(self):
         r = self.check(existing_role="arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_Developer_abc")
         self.assertTrue(any("human, developer or admin" in x for x in r))
