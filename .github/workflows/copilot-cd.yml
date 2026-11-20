@@ -183,7 +183,8 @@ jobs:
           # Bind the approved identity: recover its app id from the identity stack state.
           app_id="$(python3 -c 'import json, os; p = "../entra-agent-identity/terraform.tfstate"; print(json.load(open(p))["outputs"]["application_id"]["value"] if os.path.isfile(p) else "")' 2>/dev/null || true)"
           export TF_VAR_environment_id="$POWER_PLATFORM_ENVIRONMENT_ID"
-          export TF_VAR_solution_zip_path="$(realpath -m "$GITHUB_WORKSPACE/${SOLUTION_ZIP_PATH#./}")"
+          TF_VAR_solution_zip_path="$(realpath -m "$GITHUB_WORKSPACE/${SOLUTION_ZIP_PATH#./}")"
+          export TF_VAR_solution_zip_path
           export TF_VAR_solution_unique_name="$SOLUTION_UNIQUE_NAME"
           export TF_VAR_solution_version="$SOLUTION_VERSION"
           export TF_VAR_agent_schema_name="$AGENT_SCHEMA_NAME"
