@@ -80,6 +80,7 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
+      -var="grant_privileged_access=${GRANT_PRIVILEGED_ACCESS:-false}" \
       "$@"
 
     trigger_lc="$(printf '%s' "${TRIGGER_INTEGRATION_SYNC:-true}" | tr '[:upper:]' '[:lower:]')"
@@ -122,6 +123,7 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
+      -var="grant_privileged_access=${GRANT_PRIVILEGED_ACCESS:-false}" \
       "$@" || echo "warning: terraform destroy exited non-zero — running AWS sweep" >&2
 
     echo "==> AWS resource sweep after destroy" >&2
@@ -155,6 +157,7 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
+      -var="grant_privileged_access=${GRANT_PRIVILEGED_ACCESS:-false}" \
       "$@"
 
     trigger_lc="$(printf '%s' "${TRIGGER_INTEGRATION_SYNC:-true}" | tr '[:upper:]' '[:lower:]')"
@@ -193,6 +196,7 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
+      -var="grant_privileged_access=${GRANT_PRIVILEGED_ACCESS:-false}" \
       "$@"
     ;;
   destroy-bedrock)
@@ -219,6 +223,7 @@ case "$cmd" in
       -var="aws_region=${AWS_REGION:-us-east-1}" \
       -var="agent_name=${AGENT_NAME:-demo-support-agent}" \
       -var="agent_backend=${AGENT_BACKEND:-agentcore}" \
+      -var="grant_privileged_access=${GRANT_PRIVILEGED_ACCESS:-false}" \
       "$@" || echo "warning: terraform destroy exited non-zero — running AWS sweep" >&2
 
     echo "==> AWS resource sweep after destroy" >&2

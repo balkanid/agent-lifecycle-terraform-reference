@@ -38,3 +38,9 @@ variable "agent_instruction" {
   type    = string
   default = "You are a demo assistant. Do not perform real actions against production systems."
 }
+
+variable "grant_privileged_access" {
+  type        = bool
+  description = "DEMO/TEST ONLY: attach AdministratorAccess to the agent's execution role, in addition to the narrow invoke-foundation-model policy. Use this to exercise BalkanID's \"privileged agent\" risk insight against a real Bedrock agent. Never enable this for a real, non-demo agent."
+  default     = false
+}

@@ -64,6 +64,15 @@ on:
           - use-env
           - "true"
           - "false"
+      grant_privileged_access:
+        description: "DEMO/TEST ONLY: also attach AdministratorAccess to the agent's execution role"
+        required: true
+        default: use-env
+        type: choice
+        options:
+          - use-env
+          - "true"
+          - "false"
       approval_wait_minutes:
         description: Max minutes to wait for BalkanID approval
         required: true
@@ -116,6 +125,7 @@ jobs:
       AGENT_NAME: ${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.AGENT_NAME || 'demo-support-agent' }}
       AGENT_BACKEND: ${{ github.event.inputs.agent_backend == 'use-env' && (vars.AGENT_BACKEND || 'agentcore') || github.event.inputs.agent_backend }}
       TRIGGER_INTEGRATION_SYNC: ${{ github.event.inputs.trigger_integration_sync == 'use-env' && (vars.TRIGGER_INTEGRATION_SYNC || 'true') || github.event.inputs.trigger_integration_sync }}
+      GRANT_PRIVILEGED_ACCESS: ${{ github.event.inputs.grant_privileged_access == 'use-env' && (vars.GRANT_PRIVILEGED_ACCESS || 'false') || github.event.inputs.grant_privileged_access }}
       AGENT_PURPOSE: ${{ vars.AGENT_PURPOSE || 'Agent provisioned via Terraform with BalkanID approval' }}
       SERVICE_ACCOUNT_POLICY_NAME: ${{ vars.SERVICE_ACCOUNT_POLICY_NAME || vars.LIFECYCLE_POLICY_NAME || 'AmazonBedrockFullAccess' }}
       SERVICE_ACCOUNT_ROLE_NAME: ${{ github.event.inputs.agent_name != '' && github.event.inputs.agent_name || vars.SERVICE_ACCOUNT_ROLE_NAME || vars.AGENT_NAME || 'demo-support-agent' }}
@@ -257,9 +267,13 @@ jobs:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
+          TF_VAR_grant_privileged_access: ${{ env.GRANT_PRIVILEGED_ACCESS }}
         run: |
           set +x
           echo "::notice::Applying AWS agent backend=${AGENT_BACKEND}"
+          if [[ "${GRANT_PRIVILEGED_ACCESS}" == "true" ]]; then
+            echo "::warning::GRANT_PRIVILEGED_ACCESS=true — attaching AdministratorAccess to the agent's execution role (demo/test only)"
+          fi
           terraform apply -auto-approve -input=false -no-color
 
       - name: Trigger integration sync
@@ -302,6 +316,7 @@ jobs:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_agent_name: ${{ env.AGENT_NAME }}
           TF_VAR_agent_backend: ${{ env.AGENT_BACKEND }}
+          TF_VAR_grant_privileged_access: ${{ env.GRANT_PRIVILEGED_ACCESS }}
         run: terraform destroy -auto-approve -input=false -no-color
 
       - name: AWS resource sweep after destroy

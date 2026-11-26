@@ -29,6 +29,7 @@ When the same name exists as both secret and variable, the workflow uses the **s
 | `POLL_SECONDS` | No | `5` | Seconds between approval status polls. |
 | `AGENT_BACKEND` | No | `agentcore` | When `PROVISION_AWS_AGENT=true`: `agentcore` (new accounts) or `classic` (allowlisted Classic accounts). |
 | `TRIGGER_INTEGRATION_SYNC` | No | `true` | After successful Terraform apply, call Public API `syncIntegration` |
+| `GRANT_PRIVILEGED_ACCESS` | No | `false` | **DEMO/TEST ONLY.** `true` also attaches `AdministratorAccess` to the agent's execution role, in addition to the narrow invoke policy. Never enable for a real agent. |
 | `BALKANID_PUBLIC_API_URL` | Yes (or secret) | — | Public API base URL, e.g. `https://your-tenant.balkanid.app/api/public` |
 | `BALKANID_AGENT_OWNER_EMAIL` | Yes (or secret) | — | Employee who will own the agent |
 | `BALKANID_INTEGRATION_ID` | When sync enabled (or secret) | *(empty)* | AWS integration id |
@@ -64,6 +65,7 @@ When you **Run workflow**, dropdowns default to **`use-env`** (read from environ
 | `agent_gate` | dropdown (`use-env` / `true` / `false`) | `AGENT_GATE` |
 | `agent_backend` | dropdown (`use-env` / `agentcore` / `classic`) | `AGENT_BACKEND` |
 | `trigger_integration_sync` | dropdown (`use-env` / `true` / `false`) | `TRIGGER_INTEGRATION_SYNC` |
+| `grant_privileged_access` | dropdown (`use-env` / `true` / `false`) | `GRANT_PRIVILEGED_ACCESS` |
 | `approval_wait_minutes` | dropdown (`use-env` / 30 / 60 / 120 / 240 / 360) | `APPROVAL_WAIT_MINUTES` |
 | `poll_seconds` | dropdown (`use-env` / 5 / 10 / 15 / 30 / 60) | `POLL_SECONDS` |
 | `agent_name` | text (optional) | `AGENT_NAME` |
